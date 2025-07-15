@@ -157,10 +157,35 @@ class SummarizationDataLoader:
                 return_tensors=None
             )
             input_len = len(input_tokens['input_ids'])
+            
             # Create labels with the same length as input_ids
             label = [-100] * len(input_ids)
-            for i in range(input_len, len(input_ids)):
-                label[i] = input_ids[i]
+            
+            # More robust boundary detection
+            # Try to find the exact boundary by comparing token sequences
+            combined_text = input_text + " " + target_text
+            combined_tokens = self.tokenizer(
+                combined_text,
+                add_special_tokens=False,
+                return_tensors=None
+            )
+            
+            # Find where the input tokens end in the combined sequence
+            input_token_ids = input_tokens['input_ids']
+            combined_token_ids = combined_tokens['input_ids']
+            
+            # Find the boundary by looking for the input sequence in the combined sequence
+            boundary = len(input_token_ids)
+            for i in range(len(combined_token_ids) - len(input_token_ids) + 1):
+                if combined_token_ids[i:i+len(input_token_ids)] == input_token_ids:
+                    boundary = i + len(input_token_ids)
+                    break
+            
+            # Set labels for target tokens (after the boundary)
+            for i in range(boundary, len(input_ids)):
+                if i < len(input_ids):
+                    label[i] = input_ids[i]
+            
             labels.append(label)
 
         return {

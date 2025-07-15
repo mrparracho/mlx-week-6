@@ -161,9 +161,14 @@ def evaluate_summaries(model, tokenizer: AutoTokenizer,
         num_samples: Number of samples to evaluate
         
     Returns:
-        Evaluation results
+        Dictionary with evaluation results
     """
     print(f"Evaluating model on {num_samples} samples...")
+    
+    # Ensure we don't try to sample more than available
+    actual_samples = min(num_samples, len(test_dataset))
+    if actual_samples < num_samples:
+        print(f"Warning: Requested {num_samples} samples but only {len(test_dataset)} available. Using {actual_samples} samples.")
     
     results = {
         'samples': [],
@@ -175,7 +180,7 @@ def evaluate_summaries(model, tokenizer: AutoTokenizer,
     summary_lengths = []
     
     # Sample from test dataset
-    indices = np.random.choice(len(test_dataset), num_samples, replace=False)
+    indices = np.random.choice(len(test_dataset), actual_samples, replace=False)
     
     for i, idx in enumerate(tqdm(indices, desc="Evaluating")):
         example = test_dataset[idx]
