@@ -22,7 +22,16 @@ from config import create_config_from_args, Config
 from model import create_lora_model, setup_model_and_tokenizer
 from data import load_and_preprocess_data
 from train import create_trainer, train_model
-from utils import setup_logging, print_gpu_info, print_model_size_info
+from utils import (
+    setup_logging, 
+    print_gpu_info, 
+    print_model_size_info,
+    evaluate_summaries,
+    save_evaluation_results,
+    print_evaluation_samples,
+    create_sample_summaries,
+    save_training_history
+)
 from scaling_laws import analyze_scaling_efficiency, print_scaling_analysis
 
 
@@ -362,14 +371,14 @@ def main():
                 # Note: In a real implementation, you'd load the saved model here
             
             # Evaluate model
-            # eval_results = evaluate_summaries( # This line was removed as per the new_code
-            #     model, tokenizer, test_dataset, args.eval_samples
-            # )
+            eval_results = evaluate_summaries(
+                model, tokenizer, test_dataset, args.eval_samples
+            )
             
             # Save and print evaluation results
-            # save_evaluation_results(eval_results, config.output.output_dir) # This line was removed as per the new_code
-            # print_evaluation_samples(eval_results) # This line was removed as per the new_code
-            
+            save_evaluation_results(eval_results, config.output.output_dir)
+            print_evaluation_samples(eval_results)
+
         else:
             # Training mode
             print("\n" + "="*60)
@@ -388,20 +397,20 @@ def main():
             )
             
             # Save training history
-            # save_training_history(training_history, config.output.output_dir) # This line was removed as per the new_code
+            save_training_history(training_history, config.output.output_dir)
             
             # Evaluate trained model
             print("\n" + "="*60)
             print("EVALUATING TRAINED MODEL")
             print("="*60)
             
-            # eval_results = evaluate_summaries( # This line was removed as per the new_code
-            #     model, tokenizer, test_dataset, args.eval_samples
-            # )
+            eval_results = evaluate_summaries(
+                model, tokenizer, test_dataset, args.eval_samples
+            )
             
             # Save and print evaluation results
-            # save_evaluation_results(eval_results, config.output.output_dir) # This line was removed as per the new_code
-            # print_evaluation_samples(eval_results) # This line was removed as per the new_code
+            save_evaluation_results(eval_results, config.output.output_dir)
+            print_evaluation_samples(eval_results)
             
             # Generate sample summaries if requested
             if args.generate_samples:
@@ -416,9 +425,9 @@ def main():
                     "The global economy faces unprecedented challenges as supply chain disruptions, inflation, and geopolitical tensions create uncertainty for businesses and consumers. Central banks worldwide are implementing various monetary policies to address inflation while supporting economic growth. Economists predict continued volatility in financial markets as these factors play out."
                 ]
                 
-                # create_sample_summaries( # This line was removed as per the new_code
-                #     model, tokenizer, sample_texts, config.output.output_dir
-                # )
+                create_sample_summaries(
+                    model, tokenizer, sample_texts, config.output.output_dir
+                )
         
         print("\n" + "="*80)
         print("✓ TRAINING COMPLETED SUCCESSFULLY")
