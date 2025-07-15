@@ -115,8 +115,12 @@ def generate_summary(model, tokenizer, text: str,
     """
     try:
         # Set padding token if not already set
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
+        if not hasattr(tokenizer, 'pad_token') or tokenizer.pad_token is None:
+            if hasattr(tokenizer, 'eos_token') and tokenizer.eos_token is not None:
+                tokenizer.pad_token = tokenizer.eos_token
+            else:
+                # Add a new pad token
+                tokenizer.add_special_tokens({'pad_token': '[PAD]'})
         
         # Tokenize input - NO TRUNCATION
         inputs = tokenizer(
