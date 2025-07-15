@@ -24,7 +24,6 @@ class SummarizationDataLoader:
         self.tokenizer = tokenizer
         self.debug_mode = debug_mode
         self.sample_size = sample_size
-        self._tokenizer_cache = {}  # For optional caching
         if debug_mode and sample_size is None:
             self.sample_size = 100  # Default sample size for debugging
     

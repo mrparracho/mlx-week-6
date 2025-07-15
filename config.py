@@ -41,13 +41,13 @@ class LoRAConfig:
 @dataclass
 class TrainingConfig:
     """Training configuration."""
-    learning_rate: float = 5e-5  # Reduced from 1e-4 for better stability
+    learning_rate: float = 1e-6  # Reduced for better stability on CUDA
     batch_size: int = 4
-    gradient_accumulation_steps: int = 4
+    gradient_accumulation_steps: int = 8  # Increased for effective larger batch size
     max_epochs: int = 3
     warmup_steps: int = 100
     weight_decay: float = 0.01
-    max_grad_norm: float = 1.0
+    max_grad_norm: float = 0.5  # Reduced for better stability
     save_steps: int = 500
     eval_steps: int = 500
     logging_steps: int = 10
@@ -56,19 +56,8 @@ class TrainingConfig:
     dataloader_pin_memory: bool = False
     dataloader_num_workers: int = 4
     
-    # Numerical stability settings
-    use_amp: bool = True  # Automatic Mixed Precision
-    use_gradient_checkpointing: bool = True  # Memory efficiency
-    use_fp16: bool = False  # Use float16 for training (set to False for stability)
-    fp16_full_eval: bool = False  # Use float16 for evaluation
+    # Memory and stability settings
     dataloader_drop_last: bool = True  # Drop incomplete batches
-    
-    # Boundary detection configuration
-    use_boundary_detection: bool = True
-    boundary_loss_weight: float = 0.1
-    boundary_position_weight: float = 2.0
-    boundary_smooth_window: int = 4
-
 
 @dataclass
 class DataConfig:
@@ -181,11 +170,6 @@ class Config:
         print(f"  Max Epochs: {self.training.max_epochs}")
         print(f"  Warmup Steps: {self.training.warmup_steps}")
         print(f"  Weight Decay: {self.training.weight_decay}")
-        print(f"  Use Boundary Detection: {self.training.use_boundary_detection}")
-        if self.training.use_boundary_detection:
-            print(f"  Boundary Loss Weight: {self.training.boundary_loss_weight}")
-            print(f"  Boundary Position Weight: {self.training.boundary_position_weight}")
-            print(f"  Boundary Smooth Window: {self.training.boundary_smooth_window}")
         
         print(f"\nDATA:")
         print(f"  Dataset: {self.data.dataset_name}")
