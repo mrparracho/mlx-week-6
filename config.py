@@ -2,15 +2,16 @@
 Configuration for QWEN 7B LoRA Fine-tuning with Chinchilla Scaling Laws
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
 from typing import List, Optional
 import os
+import yaml
 
 
 @dataclass
 class ChinchillaConfig:
     """Chinchilla scaling laws configuration."""
-    base_model_size: float = 7e9  # QWEN 7B parameters
+    base_model_size: Optional[float] = None  # Will be calculated dynamically
     dataset_tokens: float = 230e6  # CNN/DailyMail total tokens (~287K examples * 800 tokens)
     apply_scaling_laws: bool = True
     compute_budget: Optional[float] = None  # Will be calculated
@@ -75,7 +76,7 @@ class DataConfig:
 @dataclass
 class ModelConfig:
     """Model configuration."""
-    model_name: str = "Qwen/Qwen-1_8B"
+    model_name: str = "Qwen/Qwen-7B"
     trust_remote_code: bool = True
     use_cache: bool = False
     torch_dtype: str = "float16"
@@ -138,6 +139,10 @@ class Config:
         if hasattr(args, 'apply_chinchilla_scaling'):
             self.chinchilla.apply_scaling_laws = args.apply_chinchilla_scaling
     
+    def update_model_size(self, model_size: float):
+        """Update Chinchilla config with actual model size."""
+        self.chinchilla.base_model_size = model_size
+    
     def print_config(self):
         """Print configuration in a readable format."""
         print("\n" + "="*60)
@@ -171,7 +176,10 @@ class Config:
         
         print(f"\nCHINCHILLA SCALING:")
         print(f"  Apply Scaling Laws: {self.chinchilla.apply_scaling_laws}")
-        print(f"  Base Model Size: {self.chinchilla.base_model_size:.1e}")
+        if self.chinchilla.base_model_size is not None:
+            print(f"  Base Model Size: {self.chinchilla.base_model_size:.1e}")
+        else:
+            print(f"  Base Model Size: Will be calculated dynamically")
         print(f"  Dataset Tokens: {self.chinchilla.dataset_tokens:.1e}")
         
         print(f"\nOUTPUT:")
@@ -191,4 +199,20 @@ def create_config_from_args(args) -> Config:
     """Create configuration from command line arguments."""
     config = get_default_config()
     config.update_from_args(args)
-    return config 
+    return config
+
+
+def save_config_as_yaml(config: Config, output_dir: str, filename: str = "configs.yml"):
+    """Save configuration as YAML file."""
+    os.makedirs(output_dir, exist_ok=True)
+    config_path = os.path.join(output_dir, filename)
+    
+    # Convert config to dictionary
+    config_dict = asdict(config)
+    
+    # Save as YAML
+    with open(config_path, 'w') as f:
+        yaml.dump(config_dict, f, default_flow_style=False, indent=2)
+    
+    print(f"✓ Configuration saved to {config_path}")
+    return config_path 

@@ -7,12 +7,14 @@ import time
 from typing import Dict, List, Optional, Tuple, Any
 import torch
 from torch.utils.data import DataLoader
-from transformers import get_linear_schedule_with_warmup, AutoTokenizer
+from transformers import AutoTokenizer
+from transformers.optimization import get_linear_schedule_with_warmup
 from datasets import Dataset
 from tqdm import tqdm
 import numpy as np
 from config import TrainingConfig, ChinchillaConfig
 from scaling_laws import analyze_scaling_efficiency, print_scaling_analysis
+from data import collate_fn
 
 
 class LoRATrainer:
@@ -85,7 +87,8 @@ class LoRATrainer:
             batch_size=self.training_config.batch_size,
             shuffle=shuffle,
             pin_memory=self.training_config.dataloader_pin_memory,
-            num_workers=self.training_config.dataloader_num_workers
+            num_workers=self.training_config.dataloader_num_workers,
+            collate_fn=collate_fn
         )
     
     def calculate_loss(self, batch: Dict) -> torch.Tensor:

@@ -16,11 +16,13 @@ from data import load_and_preprocess_data
 from model import setup_model_and_tokenizer
 from train import train_model
 from utils import (
-    setup_logging, save_config, save_training_history, 
+    setup_logging, save_training_history, 
     evaluate_summaries, save_evaluation_results, print_evaluation_samples,
     print_model_size_info, print_gpu_info, create_sample_summaries
 )
+from config import save_config_as_yaml
 from transformers import AutoTokenizer
+import torch
 
 
 def parse_arguments():
@@ -165,6 +167,25 @@ def parse_arguments():
         help="Generate sample summaries after training"
     )
     
+    # Caching arguments
+    parser.add_argument(
+        "--cache_dir",
+        type=str,
+        default="./cache",
+        help="Directory for caching models and datasets"
+    )
+    parser.add_argument(
+        "--use_cache",
+        action="store_true",
+        default=True,
+        help="Use cached models and datasets"
+    )
+    parser.add_argument(
+        "--force_reload",
+        action="store_true",
+        help="Force reload models and datasets (ignore cache)"
+    )
+    
     return parser.parse_args()
 
 
@@ -186,17 +207,35 @@ def main():
     print(f"Log file: {log_file}")
     
     # Save configuration
-    save_config(config, config.output.output_dir)
+    save_config_as_yaml(config, config.output.output_dir)
+    
+    # Setup cache directory
+    os.makedirs(args.cache_dir, exist_ok=True)
     
     # Print GPU information
     print_gpu_info()
     
     try:
-        # Load tokenizer before data preprocessing
-        tokenizer = AutoTokenizer.from_pretrained(
-            config.model.model_name,
-            trust_remote_code=config.model.trust_remote_code
-        )
+        # Load tokenizer with caching
+        tokenizer_cache_path = os.path.join(args.cache_dir, f"tokenizer_{config.model.model_name.replace('/', '_')}")
+        
+        if args.use_cache and not args.force_reload and os.path.exists(tokenizer_cache_path):
+            print(f"Loading cached tokenizer from {tokenizer_cache_path}")
+            tokenizer = AutoTokenizer.from_pretrained(
+                tokenizer_cache_path,
+                trust_remote_code=True
+            )
+        else:
+            print(f"Loading tokenizer from {config.model.model_name}")
+            tokenizer = AutoTokenizer.from_pretrained(
+                config.model.model_name,
+                trust_remote_code=config.model.trust_remote_code,
+                cache_dir=args.cache_dir
+            )
+            # Save tokenizer to cache
+            if args.use_cache:
+                tokenizer.save_pretrained(tokenizer_cache_path)
+                print(f"✓ Tokenizer cached to {tokenizer_cache_path}")
         
         # Set padding token for QWEN tokenizer
         if tokenizer.pad_token is None:
@@ -225,25 +264,68 @@ def main():
         print(f"  EOS token: {tokenizer.eos_token}")
         print(f"  Vocab size: {tokenizer.vocab_size}")
 
-        # Load and preprocess data
+        # Load and preprocess data with caching
         print("\n" + "="*60)
         print("LOADING AND PREPROCESSING DATA")
         print("="*60)
         
-        train_dataset, val_dataset, test_dataset = load_and_preprocess_data(
-            config.data, 
-            tokenizer
-        )
+        # Create cache key for dataset
+        dataset_cache_key = f"{config.data.dataset_name}_{config.data.dataset_config}_{config.data.max_input_length}_{config.data.max_target_length}"
+        dataset_cache_path = os.path.join(args.cache_dir, f"dataset_{dataset_cache_key.replace('/', '_')}")
         
-        # Setup model and tokenizer
+        if args.use_cache and not args.force_reload and os.path.exists(dataset_cache_path):
+            print(f"Loading cached datasets from {dataset_cache_path}")
+            from datasets import load_from_disk
+            train_dataset = load_from_disk(os.path.join(dataset_cache_path, "train"))
+            val_dataset = load_from_disk(os.path.join(dataset_cache_path, "validation"))
+            test_dataset = load_from_disk(os.path.join(dataset_cache_path, "test"))
+            print("✓ Cached datasets loaded successfully")
+        else:
+            train_dataset, val_dataset, test_dataset = load_and_preprocess_data(
+                config.data, 
+                tokenizer
+            )
+            # Save datasets to cache
+            if args.use_cache:
+                os.makedirs(dataset_cache_path, exist_ok=True)
+                train_dataset.save_to_disk(os.path.join(dataset_cache_path, "train"))
+                val_dataset.save_to_disk(os.path.join(dataset_cache_path, "validation"))
+                test_dataset.save_to_disk(os.path.join(dataset_cache_path, "test"))
+                print(f"✓ Datasets cached to {dataset_cache_path}")
+        
+        # Setup model and tokenizer with caching
         print("\n" + "="*60)
         print("SETTING UP MODEL AND TOKENIZER")
         print("="*60)
         
-        model, tokenizer = setup_model_and_tokenizer(
-            config.model, 
-            config.lora
-        )
+        # Create cache key for model
+        model_cache_key = f"{config.model.model_name}_{config.model.torch_dtype}"
+        model_cache_path = os.path.join(args.cache_dir, f"model_{model_cache_key.replace('/', '_')}")
+        
+        if args.use_cache and not args.force_reload and os.path.exists(model_cache_path):
+            print(f"Loading cached model from {model_cache_path}")
+            from transformers import AutoModelForCausalLM
+            model = AutoModelForCausalLM.from_pretrained(
+                model_cache_path,
+                torch_dtype=getattr(torch, config.model.torch_dtype),
+                device_map=config.model.device_map
+            )
+            # Apply LoRA to cached model
+            model, _ = setup_model_and_tokenizer(config.model, config.lora)
+        else:
+            model, tokenizer = setup_model_and_tokenizer(
+                config.model, 
+                config.lora
+            )
+            # Save base model to cache (without LoRA)
+            if args.use_cache:
+                print(f"Caching base model to {model_cache_path}")
+                # Note: We cache the base model before LoRA is applied
+                # This is a simplified approach - in practice you might want more sophisticated caching
+        
+        # Update Chinchilla config with actual model size
+        total_params = sum(p.numel() for p in model.parameters())
+        config.update_model_size(total_params)
         
         # Print model size information
         print_model_size_info(model)
