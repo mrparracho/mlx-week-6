@@ -294,7 +294,6 @@ def evaluate_summaries(model, tokenizer: AutoTokenizer,
             input_ids = example['input_ids']
             # Decode the input tokens to get the original text
             original_text = tokenizer.decode(input_ids, skip_special_tokens=True)
-            print(f"Debug - Original text: {original_text}")
             # Check if highlights field is available in preprocessed dataset
             if 'highlights' in example:
                 target_summary = example['highlights']
