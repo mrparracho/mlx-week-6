@@ -1,8 +1,8 @@
 {
   "chinchilla": "ChinchillaConfig(base_model_size=7000000000.0, dataset_tokens=230000000.0, apply_scaling_laws=True, compute_budget=None, optimal_model_size=None, optimal_training_tokens=None)",
   "lora": "LoRAConfig(rank=16, alpha=32, dropout=0.1, target_modules=['c_attn', 'c_proj'], bias='none', task_type='CAUSAL_LM')",
-  "training": "TrainingConfig(learning_rate=0.0001, batch_size=1, gradient_accumulation_steps=4, max_epochs=1, warmup_steps=100, weight_decay=0.01, max_grad_norm=1.0, save_steps=500, eval_steps=500, logging_steps=10, save_total_limit=3, remove_unused_columns=False, dataloader_pin_memory=False, dataloader_num_workers=0)",
+  "training": "TrainingConfig(learning_rate=0.0001, batch_size=4, gradient_accumulation_steps=4, max_epochs=3, warmup_steps=100, weight_decay=0.01, max_grad_norm=1.0, save_steps=500, eval_steps=500, logging_steps=10, save_total_limit=3, remove_unused_columns=False, dataloader_pin_memory=False, dataloader_num_workers=4)",
   "data": "DataConfig(dataset_name='cnn_dailymail', dataset_config='3.0.0', max_input_length=1024, max_target_length=128, truncation=True, padding='max_length', return_tensors='pt', train_split='train', validation_split='validation', test_split='test', input_prefix='Summarize: ', target_prefix='')",
-  "model": "ModelConfig(model_name='Qwen/Qwen-7B', trust_remote_code=True, use_cache=False, torch_dtype='float16', device_map='auto')",
+  "model": "ModelConfig(model_name='Qwen/Qwen-1_8B', trust_remote_code=True, use_cache=False, torch_dtype='float16', device_map='auto')",
   "output": "OutputConfig(output_dir='./trained_model', save_model=True, save_tokenizer=True, save_config=True, push_to_hub=False, hub_model_id=None, hub_token=None)"
 }

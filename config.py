@@ -52,7 +52,7 @@ class TrainingConfig:
     save_total_limit: int = 3
     remove_unused_columns: bool = False
     dataloader_pin_memory: bool = False
-    dataloader_num_workers: int = 0
+    dataloader_num_workers: int = 4
 
 
 @dataclass
@@ -75,7 +75,7 @@ class DataConfig:
 @dataclass
 class ModelConfig:
     """Model configuration."""
-    model_name: str = "Qwen/Qwen-7B"
+    model_name: str = "Qwen/Qwen-1_8B"
     trust_remote_code: bool = True
     use_cache: bool = False
     torch_dtype: str = "float16"
