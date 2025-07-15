@@ -121,8 +121,10 @@ class SummarizationDataLoader:
         model_max_length = getattr(self.tokenizer, 'model_max_length', 2048)  # fallback to 2048 if not set
         
         for input_text, target_text in zip(examples['input'], examples['target']):
-            # No truncation: allow full input and target
+            # Use the existing format: "Summarize: [article] [summary]"
+            # Just concatenate input and target as they are
             combined_text = input_text + " " + target_text
+            
             # Tokenize to check length
             combined_tokens = self.tokenizer(
                 combined_text,
@@ -131,9 +133,10 @@ class SummarizationDataLoader:
             )
             if len(combined_tokens['input_ids']) > model_max_length:
                 print(f"[WARNING] Sequence length {len(combined_tokens['input_ids'])} exceeds model max length {model_max_length}. Truncating.")
-                # Truncate from the left (keep the end, which includes the target)
+                # Truncate from the left (keep the end, which includes the summary)
                 truncated_ids = combined_tokens['input_ids'][-model_max_length:]
                 combined_text = self.tokenizer.decode(truncated_ids, skip_special_tokens=True)
+            
             processed_texts.append(combined_text)
             input_texts.append(input_text)
             target_texts.append(target_text)
@@ -149,10 +152,13 @@ class SummarizationDataLoader:
 
         labels = []
         for input_text, target_text, input_ids in zip(input_texts, target_texts, tokenized['input_ids']):
-            # Find the boundary between input and target by tokenizing input + space
-            input_with_space = input_text + " "
+            # Find the boundary by looking for "Summarize:" in the tokenized text
+            decoded_text = self.tokenizer.decode(input_ids, skip_special_tokens=True)
+            
+            # Find where the article ends (after "Summarize: [article]")
+            # The target starts after the input_text part
             input_tokens = self.tokenizer(
-                input_with_space,
+                input_text,
                 add_special_tokens=False,
                 return_tensors=None
             )
@@ -161,11 +167,8 @@ class SummarizationDataLoader:
             # Create labels with the same length as input_ids
             label = [-100] * len(input_ids)
             
-            # Use the simple approach: assume input tokens are at the beginning
-            # This is more reliable than trying to find exact boundaries
+            # Set labels for target tokens (after the input part)
             boundary = min(input_len, len(input_ids))
-            
-            # Set labels for target tokens (after the boundary)
             for i in range(boundary, len(input_ids)):
                 if i < len(input_ids):
                     label[i] = input_ids[i]
