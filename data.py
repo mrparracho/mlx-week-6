@@ -170,11 +170,6 @@ class SummarizationDataLoader:
                 if i < len(input_ids):
                     label[i] = input_ids[i]
             
-            # Debug: Print some statistics for the first few examples
-            if len(labels) < 3:  # Only for first 3 examples
-                non_100_count = sum(1 for l in label if l != -100)
-                print(f"Debug - Example {len(labels)}: {len(input_ids)} total tokens, {non_100_count} target tokens ({non_100_count/len(input_ids)*100:.1f}%)")
-            
             labels.append(label)
 
         return {
