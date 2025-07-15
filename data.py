@@ -80,7 +80,7 @@ class SummarizationDataLoader:
     
     def tokenize_function(self, examples: Dict) -> Dict:
         """
-        Tokenize input and target texts.
+        Tokenize input and target texts for causal LM training.
         
         Args:
             examples: Batch of examples
@@ -88,32 +88,54 @@ class SummarizationDataLoader:
         Returns:
             Tokenized examples
         """
-        # QWEN tokenizer does not support padding tokens; must pad manually after tokenization
-        # Tokenize inputs (no return_tensors)
-        inputs = self.tokenizer(
-            examples['input'],
-            max_length=self.config.max_input_length,
+        # For causal LM, we need to concatenate input and target
+        # Format: input + target (with proper separators)
+        combined_texts = []
+        for input_text, target_text in zip(examples['input'], examples['target']):
+            # Add separator between input and target
+            combined_text = input_text + " " + target_text
+            combined_texts.append(combined_text)
+        
+        # Tokenize combined texts
+        tokenized = self.tokenizer(
+            combined_texts,
+            max_length=self.config.max_input_length + self.config.max_target_length,
             truncation=self.config.truncation,
             padding=False  # No padding
         )
         
-        # Tokenize targets (no return_tensors)
-        targets = self.tokenizer(
-            examples['target'],
-            max_length=self.config.max_target_length,
-            truncation=self.config.truncation,
-            padding=False  # No padding
-        )
-        
-        # Create labels (same as target input_ids for causal LM)
-        labels = [target_ids[:] for target_ids in targets['input_ids']]
+        # Create labels for causal LM training
+        # Labels should be -100 for input tokens and actual token IDs for target tokens
+        labels = []
+        for i, (input_text, target_text) in enumerate(zip(examples['input'], examples['target'])):
+            # Tokenize input and target separately to find boundaries
+            input_tokens = self.tokenizer(
+                input_text,
+                add_special_tokens=False,
+                return_tensors=None
+            )
+            target_tokens = self.tokenizer(
+                target_text,
+                add_special_tokens=False,
+                return_tensors=None
+            )
+            
+            input_length = len(input_tokens['input_ids'])
+            target_length = len(target_tokens['input_ids'])
+            
+            # Create labels: -100 for input, actual tokens for target
+            label = [-100] * input_length + target_tokens['input_ids']
+            
+            # Truncate if needed
+            if len(label) > self.config.max_input_length + self.config.max_target_length:
+                label = label[:self.config.max_input_length + self.config.max_target_length]
+            
+            labels.append(label)
         
         return {
-            'input_ids': inputs['input_ids'],
-            'attention_mask': inputs['attention_mask'],
-            'labels': labels,
-            'target_ids': targets['input_ids'],
-            'target_attention_mask': targets['attention_mask']
+            'input_ids': tokenized['input_ids'],
+            'attention_mask': tokenized['attention_mask'],
+            'labels': labels
         }
     
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
@@ -157,23 +179,25 @@ class SummarizationDataLoader:
             Dictionary with statistics
         """
         input_lengths = []
-        target_lengths = []
+        label_lengths = []
         
         for example in tqdm(dataset, desc="Calculating statistics"):
             input_lengths.append(len(example['input_ids']))
-            target_lengths.append(len(example['target_ids']))
+            # Count non-padding labels (where label != -100)
+            valid_labels = [l for l in example['labels'] if l != -100]
+            label_lengths.append(len(valid_labels))
         
         stats = {
             'num_examples': len(dataset),
             'avg_input_length': np.mean(input_lengths),
-            'avg_target_length': np.mean(target_lengths),
+            'avg_target_length': np.mean(label_lengths),
             'max_input_length': np.max(input_lengths),
-            'max_target_length': np.max(target_lengths),
+            'max_target_length': np.max(label_lengths),
             'min_input_length': np.min(input_lengths),
-            'min_target_length': np.min(target_lengths),
+            'min_target_length': np.min(label_lengths),
             'total_input_tokens': sum(input_lengths),
-            'total_target_tokens': sum(target_lengths),
-            'total_tokens': sum(input_lengths) + sum(target_lengths)
+            'total_target_tokens': sum(label_lengths),
+            'total_tokens': sum(input_lengths) + sum(label_lengths)
         }
         
         return stats
@@ -265,7 +289,7 @@ def load_and_preprocess_data(config: DataConfig, tokenizer: PreTrainedTokenizer)
 
 def collate_fn(batch, pad_token_id=0):
     """
-    Custom collate function to pad input_ids, attention_mask, labels, etc. for QWEN.
+    Custom collate function to pad input_ids, attention_mask, labels for causal LM training.
     Args:
         batch: List of dicts from the dataset
         pad_token_id: Token ID to use for padding (default 0)
@@ -275,19 +299,13 @@ def collate_fn(batch, pad_token_id=0):
     input_ids = [torch.tensor(x['input_ids'], dtype=torch.long) for x in batch]
     attention_mask = [torch.tensor(x['attention_mask'], dtype=torch.long) for x in batch]
     labels = [torch.tensor(x['labels'], dtype=torch.long) for x in batch]
-    target_ids = [torch.tensor(x['target_ids'], dtype=torch.long) for x in batch]
-    target_attention_mask = [torch.tensor(x['target_attention_mask'], dtype=torch.long) for x in batch]
 
     input_ids_padded = pad_sequence(input_ids, batch_first=True, padding_value=pad_token_id)
     attention_mask_padded = pad_sequence(attention_mask, batch_first=True, padding_value=0)
     labels_padded = pad_sequence(labels, batch_first=True, padding_value=-100)
-    target_ids_padded = pad_sequence(target_ids, batch_first=True, padding_value=pad_token_id)
-    target_attention_mask_padded = pad_sequence(target_attention_mask, batch_first=True, padding_value=0)
 
     return {
         'input_ids': input_ids_padded,
         'attention_mask': attention_mask_padded,
-        'labels': labels_padded,
-        'target_ids': target_ids_padded,
-        'target_attention_mask': target_attention_mask_padded
+        'labels': labels_padded
     } 
