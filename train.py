@@ -250,6 +250,33 @@ class LoRATrainer:
         avg_loss = total_loss / num_batches if num_batches > 0 else float('inf')
         return avg_loss
     
+    def cleanup_old_checkpoints(self, output_dir: str):
+        """
+        Clean up old checkpoints to prevent symlink issues.
+        
+        Args:
+            output_dir: Output directory
+        """
+        import glob
+        import shutil
+        
+        # Find all checkpoint directories
+        checkpoint_pattern = os.path.join(output_dir, 'checkpoint-*')
+        checkpoints = glob.glob(checkpoint_pattern)
+        
+        # Keep only the most recent checkpoint and remove others
+        if len(checkpoints) > 1:
+            # Sort by modification time (newest first)
+            checkpoints.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+            
+            # Remove old checkpoints (keep only the newest)
+            for old_checkpoint in checkpoints[1:]:
+                try:
+                    shutil.rmtree(old_checkpoint)
+                    print(f"✓ Removed old checkpoint: {os.path.basename(old_checkpoint)}")
+                except Exception as e:
+                    print(f"Warning: Could not remove old checkpoint {old_checkpoint}: {e}")
+    
     def save_checkpoint(self, output_dir: str, is_best: bool = False):
         """
         Save a checkpoint.
@@ -281,9 +308,26 @@ class LoRATrainer:
         if is_best:
             # Create best model symlink
             best_dir = os.path.join(output_dir, 'best')
+            checkpoint_name = os.path.basename(checkpoint_dir)
+            
+            # Remove existing symlink or file if it exists
             if os.path.exists(best_dir):
-                os.remove(best_dir)
-            os.symlink(checkpoint_dir, best_dir)
+                if os.path.islink(best_dir):
+                    os.unlink(best_dir)
+                else:
+                    os.remove(best_dir)
+            
+            # Create new symlink
+            try:
+                os.symlink(checkpoint_name, best_dir)
+            except OSError as e:
+                print(f"Warning: Could not create symlink for best model: {e}")
+                # Fallback: copy the checkpoint instead
+                import shutil
+                if os.path.exists(best_dir):
+                    shutil.rmtree(best_dir)
+                shutil.copytree(checkpoint_dir, best_dir)
+                print("✓ Best model copied instead of symlinked")
     
     def apply_chinchilla_scaling(self, train_dataset: Dataset) -> Dict:
         """
@@ -363,6 +407,9 @@ class LoRATrainer:
         
         # Create output directory
         os.makedirs(output_dir, exist_ok=True)
+        
+        # Clean up old checkpoints to prevent symlink issues
+        self.cleanup_old_checkpoints(output_dir)
         
         # Training loop
         start_time = time.time()
