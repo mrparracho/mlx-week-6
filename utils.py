@@ -114,6 +114,10 @@ def generate_summary(model, tokenizer: AutoTokenizer, text: str,
         Generated summary
     """
     try:
+        # Set padding token if not already set
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        
         # Tokenize input - NO TRUNCATION
         inputs = tokenizer(
             text,
@@ -134,7 +138,7 @@ def generate_summary(model, tokenizer: AutoTokenizer, text: str,
                     max_new_tokens=max_length,
                     temperature=temperature,
                     do_sample=True,
-                    pad_token_id=tokenizer.eos_token_id,
+                    pad_token_id=tokenizer.pad_token_id,
                     eos_token_id=tokenizer.eos_token_id
                 )
                 
