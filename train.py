@@ -277,14 +277,18 @@ class LoRATrainer:
                 except Exception as e:
                     print(f"Warning: Could not remove old checkpoint {old_checkpoint}: {e}")
     
-    def save_checkpoint(self, output_dir: str, is_best: bool = False):
+    def save_checkpoint(self, output_dir: str, is_best: bool = False, current_loss: float = None):
         """
-        Save a checkpoint.
+        Save a checkpoint with smart best model management.
         
         Args:
             output_dir: Directory to save checkpoint
             is_best: Whether this is the best model so far
+            current_loss: Current validation loss for comparison
         """
+        import shutil
+        import json
+        
         checkpoint_dir = os.path.join(output_dir, f"checkpoint-{self.global_step}")
         os.makedirs(checkpoint_dir, exist_ok=True)
         
@@ -299,35 +303,157 @@ class LoRATrainer:
             'global_step': self.global_step,
             'epoch': self.epoch,
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'scheduler_state_dict': self.scheduler.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict() if self.scheduler else None,
             'best_loss': self.best_loss,
             'training_losses': self.training_losses,
             'validation_losses': self.validation_losses
         }, os.path.join(checkpoint_dir, 'training_state.pt'))
         
-        if is_best:
-            # Create best model symlink
-            best_dir = os.path.join(output_dir, 'best')
-            checkpoint_name = os.path.basename(checkpoint_dir)
-            
-            # Remove existing symlink or file if it exists
-            if os.path.exists(best_dir):
-                if os.path.islink(best_dir):
-                    os.unlink(best_dir)
-                else:
-                    os.remove(best_dir)
-            
-            # Create new symlink
+        # Save checkpoint metadata
+        checkpoint_info = {
+            'step': self.global_step,
+            'epoch': self.epoch,
+            'loss': current_loss if current_loss is not None else float('inf'),
+            'best_loss': self.best_loss,
+            'timestamp': time.time()
+        }
+        
+        with open(os.path.join(checkpoint_dir, 'checkpoint_info.json'), 'w') as f:
+            json.dump(checkpoint_info, f, indent=2)
+        
+        if is_best and current_loss is not None:
+            self._update_best_model(output_dir, checkpoint_dir, current_loss)
+        
+        # Clean up old checkpoints (keep only recent ones)
+        self._cleanup_old_checkpoints(output_dir)
+
+    def _update_best_model(self, output_dir: str, checkpoint_dir: str, current_loss: float):
+        """
+        Smart best model update based on loss comparison.
+        
+        Args:
+            output_dir: Output directory
+            checkpoint_dir: Current checkpoint directory
+            current_loss: Current validation loss
+        """
+        import shutil
+        import json
+        
+        best_dir = os.path.join(output_dir, 'best')
+        best_info_path = os.path.join(output_dir, 'best_model_info.json')
+        
+        # Check if we have a previous best model
+        previous_best_loss = float('inf')
+        if os.path.exists(best_info_path):
             try:
+                with open(best_info_path, 'r') as f:
+                    best_info = json.load(f)
+                    previous_best_loss = best_info.get('loss', float('inf'))
+            except (json.JSONDecodeError, FileNotFoundError):
+                previous_best_loss = float('inf')
+        
+        # Only update if current loss is better
+        if current_loss < previous_best_loss:
+            print(f"🏆 New best model! Loss improved from {previous_best_loss:.4f} to {current_loss:.4f}")
+            
+            # Remove existing best model
+            if os.path.exists(best_dir):
+                try:
+                    if os.path.islink(best_dir):
+                        os.unlink(best_dir)
+                    else:
+                        shutil.rmtree(best_dir)
+                except Exception as e:
+                    print(f"Warning: Could not remove old best model: {e}")
+            
+            # Create new best model (try symlink first, fallback to copy)
+            try:
+                # Try symlink
+                checkpoint_name = os.path.basename(checkpoint_dir)
                 os.symlink(checkpoint_name, best_dir)
-            except OSError as e:
-                print(f"Warning: Could not create symlink for best model: {e}")
-                # Fallback: copy the checkpoint instead
-                import shutil
-                if os.path.exists(best_dir):
-                    shutil.rmtree(best_dir)
-                shutil.copytree(checkpoint_dir, best_dir)
-                print("✓ Best model copied instead of symlinked")
+                print("✓ Best model symlinked")
+            except OSError:
+                # Fallback to copy
+                try:
+                    shutil.copytree(checkpoint_dir, best_dir)
+                    print("✓ Best model copied")
+                except Exception as e:
+                    print(f"Error copying best model: {e}")
+                    return
+            
+            # Update best model info
+            best_info = {
+                'step': self.global_step,
+                'epoch': self.epoch,
+                'loss': current_loss,
+                'checkpoint': os.path.basename(checkpoint_dir),
+                'timestamp': time.time()
+            }
+            
+            with open(best_info_path, 'w') as f:
+                json.dump(best_info, f, indent=2)
+            
+            print(f"✓ Best model info saved to {best_info_path}")
+        else:
+            print(f"📊 Current loss {current_loss:.4f} not better than best {previous_best_loss:.4f}")
+
+    def _cleanup_old_checkpoints(self, output_dir: str, keep_last: int = 3):
+        """
+        Clean up old checkpoints, keeping only the most recent ones.
+        
+        Args:
+            output_dir: Output directory
+            keep_last: Number of recent checkpoints to keep
+        """
+        import glob
+        import shutil
+        
+        # Find all checkpoint directories
+        checkpoint_pattern = os.path.join(output_dir, 'checkpoint-*')
+        checkpoints = glob.glob(checkpoint_pattern)
+        
+        if len(checkpoints) <= keep_last:
+            return
+        
+        # Sort by modification time (newest first)
+        checkpoints.sort(key=lambda x: os.path.getmtime(x), reverse=True)
+        
+        # Remove old checkpoints (keep only the most recent ones)
+        for old_checkpoint in checkpoints[keep_last:]:
+            try:
+                shutil.rmtree(old_checkpoint)
+                print(f"🗑️  Removed old checkpoint: {os.path.basename(old_checkpoint)}")
+            except Exception as e:
+                print(f"Warning: Could not remove old checkpoint {old_checkpoint}: {e}")
+
+    def get_best_model_info(self, output_dir: str) -> dict:
+        """
+        Get information about the best model.
+        
+        Args:
+            output_dir: Output directory
+            
+        Returns:
+            Dictionary with best model information
+        """
+        import json
+        
+        best_info_path = os.path.join(output_dir, 'best_model_info.json')
+        
+        if os.path.exists(best_info_path):
+            try:
+                with open(best_info_path, 'r') as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, FileNotFoundError):
+                pass
+        
+        return {
+            'step': 0,
+            'epoch': 0,
+            'loss': float('inf'),
+            'checkpoint': None,
+            'timestamp': None
+        }
     
     def apply_chinchilla_scaling(self, train_dataset: Dataset) -> Dict:
         """
@@ -445,8 +571,11 @@ class LoRATrainer:
                     # Save checkpoint if best so far
                     if val_loss < self.best_loss:
                         self.best_loss = val_loss
-                        self.save_checkpoint(output_dir, is_best=True)
+                        self.save_checkpoint(output_dir, is_best=True, current_loss=val_loss)
                         print(f"✓ New best model saved (loss: {val_loss:.4f})")
+                    else:
+                        # Still save checkpoint but not as best
+                        self.save_checkpoint(output_dir, is_best=False, current_loss=val_loss)
                 
                 # Save checkpoint
                 if self.global_step % self.training_config.save_steps == 0:
@@ -456,6 +585,12 @@ class LoRATrainer:
             val_loss = self.validate(val_dataloader)
             self.validation_losses.append(val_loss)
             print(f"Epoch {epoch + 1} - Validation Loss: {val_loss:.4f}")
+
+            # Check if this is the best model at end of epoch
+            if val_loss < self.best_loss:
+                self.best_loss = val_loss
+                self.save_checkpoint(output_dir, is_best=True, current_loss=val_loss)
+                print(f"✓ New best model saved at end of epoch (loss: {val_loss:.4f})")
         
         # Training completed
         total_time = time.time() - start_time
