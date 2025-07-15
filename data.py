@@ -146,6 +146,20 @@ class SummarizationDataLoader:
             'labels': labels
         }
     
+    def _get_optimal_num_proc(self) -> int:
+        """
+        Calculate optimal number of processes for tokenization.
+        Uses 80% of available CPU cores with sensible bounds.
+        """
+        import os
+        total_cores = os.cpu_count()
+        if total_cores is None:
+            return 4  # Fallback if CPU count can't be determined
+        
+        # Use 80% of available cores, with bounds
+        optimal_procs = max(1, min(int(total_cores * 0.8), 16))
+        return optimal_procs
+
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
         print("Preprocessing dataset...")
         formatted_dataset = dataset.map(
@@ -153,11 +167,18 @@ class SummarizationDataLoader:
             remove_columns=dataset.column_names,
             desc="Formatting for summarization"
         )
+        
+        # Dynamically calculate optimal number of processes
+        optimal_procs = self._get_optimal_num_proc()
+        import os
+        total_cores = os.cpu_count()
+        print(f"🔄 Using {optimal_procs} processes for tokenization (80% of {total_cores} CPU cores)")
+        
         tokenized_dataset = formatted_dataset.map(
             self.tokenize_function,
             batched=True,
             batch_size=1000,
-            num_proc=4,
+            num_proc=optimal_procs,
             remove_columns=formatted_dataset.column_names,
             desc="Tokenizing"
         )

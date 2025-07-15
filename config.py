@@ -41,7 +41,7 @@ class LoRAConfig:
 @dataclass
 class TrainingConfig:
     """Training configuration."""
-    learning_rate: float = 1e-4
+    learning_rate: float = 5e-5  # Reduced from 1e-4 for better stability
     batch_size: int = 4
     gradient_accumulation_steps: int = 4
     max_epochs: int = 3
@@ -55,6 +55,13 @@ class TrainingConfig:
     remove_unused_columns: bool = False
     dataloader_pin_memory: bool = False
     dataloader_num_workers: int = 4
+    
+    # Numerical stability settings
+    use_amp: bool = True  # Automatic Mixed Precision
+    use_gradient_checkpointing: bool = True  # Memory efficiency
+    use_fp16: bool = False  # Use float16 for training (set to False for stability)
+    fp16_full_eval: bool = False  # Use float16 for evaluation
+    dataloader_drop_last: bool = True  # Drop incomplete batches
     
     # Boundary detection configuration
     use_boundary_detection: bool = True

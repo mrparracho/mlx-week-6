@@ -274,58 +274,84 @@ class LoRATrainer:
             else:
                 print(f"  🔍 Boundary Detection: DISABLED")
         
-        # Calculate loss
+        # Calculate loss with numerical stability checks
         loss = self.calculate_loss(batch)
         
-        # Debug: Check loss
+        # Numerical stability checks
+        if torch.isnan(loss) or torch.isinf(loss):
+            print(f"⚠️  NUMERICAL INSTABILITY DETECTED at step {self.global_step}")
+            print(f"  Loss value: {loss.item()}")
+            print(f"  Batch size: {batch['input_ids'].shape[0]}")
+            print(f"  Input shape: {batch['input_ids'].shape}")
+            print(f"  Labels shape: {batch['labels'].shape}")
+            
+            # Check for valid labels
+            valid_labels = (batch['labels'] != -100).sum().item()
+            print(f"  Valid label positions: {valid_labels}")
+            
+            # Skip this batch if loss is invalid
+            if torch.isnan(loss) or torch.isinf(loss):
+                print(f"  Skipping batch due to invalid loss")
+                return float('inf')  # Return high loss to indicate problem
+        
+        # Debug: Check loss (only for first few steps)
         if self.global_step < 5:
             print(f"  Loss: {loss.item()}")
-            if torch.isnan(loss):
-                print(f"  ⚠️  LOSS IS NAN!")
-                # Check if labels have any valid positions
-                valid_labels = (labels != -100).sum().item()
-                print(f"  Valid label positions: {valid_labels}")
-                # Check if input_ids and labels have the same shape
-                print(f"  Input shape: {input_ids.shape}, Labels shape: {labels.shape}")
-                # Check for any inf values in the model outputs
-                with torch.no_grad():
-                    # Move tensors to device for debugging
-                    input_ids_debug = input_ids.to(self.device)
-                    attention_mask_debug = attention_mask.to(self.device)
-                    labels_debug = labels.to(self.device)
-                    
-                    outputs = self.model(
-                        input_ids=input_ids_debug,
-                        attention_mask=attention_mask_debug,
-                        labels=labels_debug
-                    )
-                    if hasattr(outputs, 'logits'):
-                        logits = outputs.logits
-                        if torch.isnan(logits).any():
-                            print(f"  ⚠️  LOGITS CONTAIN NAN!")
-                        if torch.isinf(logits).any():
-                            print(f"  ⚠️  LOGITS CONTAIN INF!")
+            
+            # Additional debugging for numerical issues
+            with torch.no_grad():
+                input_ids_debug = batch['input_ids'].to(self.device)
+                attention_mask_debug = batch['attention_mask'].to(self.device)
+                labels_debug = batch['labels'].to(self.device)
+                
+                outputs = self.model(
+                    input_ids=input_ids_debug,
+                    attention_mask=attention_mask_debug,
+                    labels=labels_debug
+                )
+                if hasattr(outputs, 'logits'):
+                    logits = outputs.logits
+                    if torch.isnan(logits).any():
+                        print(f"  ⚠️  LOGITS CONTAIN NAN!")
+                    if torch.isinf(logits).any():
+                        print(f"  ⚠️  LOGITS CONTAIN INF!")
+                    print(f"  Logits range: {logits.min().item():.6f} to {logits.max().item():.6f}")
         
-        # Backward pass
+        # Backward pass with gradient stability checks
         loss.backward()
         
-        # Debug: Check gradients
-        if self.global_step < 5:
-            total_grad_norm = 0
-            for name, param in self.model.named_parameters():
-                if param.grad is not None:
-                    grad_norm = param.grad.norm().item()
-                    total_grad_norm += grad_norm ** 2
-                    if grad_norm > 0:
-                        print(f"  {name}: grad_norm = {grad_norm:.6f}")
-            total_grad_norm = total_grad_norm ** 0.5
-            print(f"  Total grad norm: {total_grad_norm:.6f}")
+        # Check for gradient issues
+        grad_norm = 0.0
+        has_grad = False
+        for param in self.model.parameters():
+            if param.grad is not None:
+                has_grad = True
+                param_grad_norm = param.grad.norm().item()
+                if torch.isnan(param_grad_norm) or torch.isinf(param_grad_norm):
+                    print(f"⚠️  GRADIENT CONTAINS NAN/INF: {param_grad_norm}")
+                    # Zero out problematic gradients
+                    param.grad.zero_()
+                else:
+                    grad_norm += param_grad_norm ** 2
         
-        # Gradient clipping
-        torch.nn.utils.clip_grad_norm_(
-            self.model.parameters(), 
-            self.training_config.max_grad_norm
-        )
+        if not has_grad:
+            print(f"⚠️  NO GRADIENTS FOUND at step {self.global_step}")
+            return float('inf')
+        
+        grad_norm = grad_norm ** 0.5
+        
+        # Debug: Check gradients (only for first few steps)
+        if self.global_step < 5:
+            print(f"  Total grad norm: {grad_norm:.6f}")
+        
+        # Gradient clipping with stability check
+        if grad_norm > 0 and not torch.isnan(grad_norm) and not torch.isinf(grad_norm):
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), 
+                self.training_config.max_grad_norm
+            )
+        else:
+            print(f"⚠️  SKIPPING GRADIENT CLIPPING due to invalid grad_norm: {grad_norm}")
         
         # Optimizer step
         self.optimizer.step()
