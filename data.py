@@ -140,11 +140,17 @@ class SummarizationDataLoader:
             boundary = min(input_len, len(input_ids))
             label[boundary:] = input_ids[boundary:]
             labels.append(label)
-        return {
+        # Pass through highlights and article fields if present
+        result = {
             'input_ids': tokenized['input_ids'],
             'attention_mask': tokenized['attention_mask'],
             'labels': labels
         }
+        if 'highlights' in examples:
+            result['highlights'] = examples['highlights']
+        if 'article' in examples:
+            result['article'] = examples['article']
+        return result
     
     def _get_optimal_num_proc(self) -> int:
         """

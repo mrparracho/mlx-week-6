@@ -126,36 +126,120 @@ def generate_summary(model, tokenizer, text: str,
         device = next(model.parameters()).device
         inputs = {k: v.to(device) for k, v in inputs.items()}
         
-        # Generate with error handling
+        # Generate with enhanced numerical stability
         with torch.no_grad():
             try:
+                # Add numerical stability measures
+                torch.set_grad_enabled(False)
+                
+                # Use more conservative generation parameters for stability
                 outputs = model.generate(
                     **inputs,
                     max_new_tokens=max_length,
-                    temperature=temperature,
-                    do_sample=True
-                    # Don't specify pad_token_id or eos_token_id - let the model handle it
+                    temperature=max(0.1, temperature),  # Ensure temperature > 0
+                    do_sample=True,
+                    top_p=0.9,  # Add nucleus sampling for stability
+                    top_k=50,   # Add top-k sampling for stability
+                    repetition_penalty=1.1,  # Prevent repetition
+                    pad_token_id=tokenizer.eos_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                    # Add numerical stability
+                    use_cache=True,
+                    return_dict_in_generate=True,
+                    output_scores=False  # Don't return scores to avoid numerical issues
                 )
                 
-                # Decode the generated text
-                generated_text = tokenizer.decode(
-                    outputs[0][inputs['input_ids'].shape[1]:], 
-                    skip_special_tokens=True
-                )
+                # Handle different output formats
+                if hasattr(outputs, 'sequences'):
+                    generated_ids = outputs.sequences[0]
+                else:
+                    generated_ids = outputs[0]
                 
-                return generated_text.strip()
+                # Decode the generated text with error handling
+                try:
+                    generated_text = tokenizer.decode(
+                        generated_ids[inputs['input_ids'].shape[1]:], 
+                        skip_special_tokens=True,
+                        clean_up_tokenization_spaces=True
+                    )
+                    return generated_text.strip()
+                except Exception as decode_error:
+                    print(f"⚠️  Error decoding generated text: {decode_error}")
+                    return "[ERROR: Failed to decode generated text]"
                 
             except RuntimeError as e:
-                if "probability tensor contains" in str(e) or "device-side assert" in str(e):
-                    print(f"⚠️  Model produced invalid probabilities. This usually means the model wasn't trained properly.")
-                    print(f"   Error: {str(e)}")
-                    return "[ERROR: Model not properly trained - invalid probabilities]"
+                error_msg = str(e)
+                if any(keyword in error_msg.lower() for keyword in [
+                    "probability tensor", "device-side assert", "nan", "inf", 
+                    "invalid", "assertion failed"
+                ]):
+                    print(f"⚠️  NUMERICAL INSTABILITY DETECTED during generation")
+                    print(f"   Error: {error_msg}")
+                    print(f"   This indicates the model needs more training or better hyperparameters")
+                    return "[ERROR: Numerical instability - model needs more training]"
                 else:
-                    raise e
+                    print(f"⚠️  Runtime error during generation: {error_msg}")
+                    return f"[ERROR: {error_msg}]"
+            except Exception as e:
+                print(f"⚠️  Unexpected error during generation: {str(e)}")
+                return f"[ERROR: {str(e)}]"
                     
     except Exception as e:
         print(f"⚠️  Error during generation: {str(e)}")
         return f"[ERROR: {str(e)}]"
+
+
+def check_model_health(model, tokenizer: AutoTokenizer) -> bool:
+    """
+    Check if the model is healthy and ready for evaluation.
+    
+    Args:
+        model: Trained model
+        tokenizer: Tokenizer
+        
+    Returns:
+        True if model is healthy, False otherwise
+    """
+    print("🔍 Checking model health...")
+    
+    try:
+        # Test with a simple input
+        test_text = "Hello world"
+        inputs = tokenizer(test_text, return_tensors="pt", truncation=False, padding=False)
+        device = next(model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        
+        with torch.no_grad():
+            # Test forward pass
+            outputs = model(**inputs)
+            
+            if hasattr(outputs, 'logits'):
+                logits = outputs.logits
+                
+                # Check for numerical issues
+                if torch.isnan(logits).any():
+                    print("⚠️  Model logits contain NaN values")
+                    return False
+                
+                if torch.isinf(logits).any():
+                    print("⚠️  Model logits contain Inf values")
+                    return False
+                
+                # Check for reasonable logit values
+                logit_range = logits.max().item() - logits.min().item()
+                if logit_range > 1000:
+                    print(f"⚠️  Model logits have extreme range: {logit_range:.2f}")
+                    return False
+                
+                print("✓ Model health check passed")
+                return True
+            else:
+                print("⚠️  Model output doesn't have logits attribute")
+                return False
+                
+    except Exception as e:
+        print(f"⚠️  Model health check failed: {str(e)}")
+        return False
 
 
 def evaluate_summaries(model, tokenizer: AutoTokenizer, 
@@ -172,6 +256,16 @@ def evaluate_summaries(model, tokenizer: AutoTokenizer,
     Returns:
         Dictionary with evaluation results
     """
+    # Check model health first
+    if not check_model_health(model, tokenizer):
+        print("⚠️  Model failed health check. Skipping evaluation.")
+        return {
+            'samples': [],
+            'avg_summary_length': 0,
+            'avg_generation_time': 0,
+            'error': 'Model failed health check - numerical instability detected'
+        }
+    
     print(f"Evaluating model on {num_samples} samples...")
     
     # Ensure we don't try to sample more than available
@@ -201,7 +295,11 @@ def evaluate_summaries(model, tokenizer: AutoTokenizer,
             # Decode the input tokens to get the original text
             original_text = tokenizer.decode(input_ids, skip_special_tokens=True)
             print(f"Debug - Original text: {original_text}")
-            target_summary = "[Target not available in preprocessed dataset]"
+            # Check if highlights field is available in preprocessed dataset
+            if 'highlights' in example:
+                target_summary = example['highlights']
+            else:
+                target_summary = "[Target not available in preprocessed dataset]"
         else:
             # This is a raw dataset - use the original fields
             original_text = example.get('article', '')

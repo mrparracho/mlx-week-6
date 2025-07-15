@@ -5,6 +5,7 @@ Training module for QWEN 7B LoRA fine-tuning with Chinchilla scaling laws
 import os
 import time
 import random
+import math
 from typing import Dict, List, Optional, Tuple, Any
 import torch
 from torch.utils.data import DataLoader
@@ -327,7 +328,8 @@ class LoRATrainer:
             if param.grad is not None:
                 has_grad = True
                 param_grad_norm = param.grad.norm().item()
-                if torch.isnan(param_grad_norm) or torch.isinf(param_grad_norm):
+                # Check for NaN/Inf using Python math functions
+                if math.isnan(param_grad_norm) or math.isinf(param_grad_norm):
                     print(f"⚠️  GRADIENT CONTAINS NAN/INF: {param_grad_norm}")
                     # Zero out problematic gradients
                     param.grad.zero_()
@@ -345,7 +347,7 @@ class LoRATrainer:
             print(f"  Total grad norm: {grad_norm:.6f}")
         
         # Gradient clipping with stability check
-        if grad_norm > 0 and not torch.isnan(grad_norm) and not torch.isinf(grad_norm):
+        if grad_norm > 0 and not math.isnan(grad_norm) and not math.isinf(grad_norm):
             torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(), 
                 self.training_config.max_grad_norm
