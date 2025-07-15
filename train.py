@@ -158,7 +158,27 @@ class LoRATrainer:
         
         # Debug: Check loss
         if self.global_step < 5:
-            print(f"  Loss: {loss.item():.4f}")
+            print(f"  Loss: {loss.item()}")
+            if torch.isnan(loss):
+                print(f"  ⚠️  LOSS IS NAN!")
+                # Check if labels have any valid positions
+                valid_labels = (labels != -100).sum().item()
+                print(f"  Valid label positions: {valid_labels}")
+                # Check if input_ids and labels have the same shape
+                print(f"  Input shape: {input_ids.shape}, Labels shape: {labels.shape}")
+                # Check for any inf values in the model outputs
+                with torch.no_grad():
+                    outputs = self.model(
+                        input_ids=input_ids,
+                        attention_mask=attention_mask,
+                        labels=labels
+                    )
+                    if hasattr(outputs, 'logits'):
+                        logits = outputs.logits
+                        if torch.isnan(logits).any():
+                            print(f"  ⚠️  LOGITS CONTAIN NAN!")
+                        if torch.isinf(logits).any():
+                            print(f"  ⚠️  LOGITS CONTAIN INF!")
         
         # Backward pass
         loss.backward()
