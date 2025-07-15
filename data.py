@@ -249,32 +249,50 @@ class SummarizationDataLoader:
                 label_lengths.append(valid_count)
             
             # Calculate sample statistics
-            avg_input_length = np.mean(input_lengths)
-            avg_target_length = np.mean(label_lengths)
-            max_input_length = np.max(input_lengths)
-            max_target_length = np.max(label_lengths)
-            min_input_length = np.min(input_lengths)
-            min_target_length = np.min(label_lengths)
-            
-            # Extrapolate to full dataset
-            total_input_tokens = int(avg_input_length * dataset_size)
-            total_target_tokens = int(avg_target_length * dataset_size)
-            
-            stats = {
-                'num_examples': dataset_size,
-                'avg_input_length': avg_input_length,
-                'avg_target_length': avg_target_length,
-                'max_input_length': max_input_length,
-                'max_target_length': max_target_length,
-                'min_input_length': min_input_length,
-                'min_target_length': min_target_length,
-                'total_input_tokens': total_input_tokens,
-                'total_target_tokens': total_target_tokens,
-                'total_tokens': total_input_tokens + total_target_tokens,
-                'sampled': True,
-                'sample_size': sample_size,
-                'extrapolated': True
-            }
+            if not input_lengths or not label_lengths:
+                # Handle empty dataset case
+                stats = {
+                    'num_examples': 0,
+                    'avg_input_length': 0.0,
+                    'avg_target_length': 0.0,
+                    'max_input_length': 0,
+                    'max_target_length': 0,
+                    'min_input_length': 0,
+                    'min_target_length': 0,
+                    'total_input_tokens': 0,
+                    'total_target_tokens': 0,
+                    'total_tokens': 0,
+                    'sampled': True,
+                    'sample_size': sample_size,
+                    'extrapolated': True
+                }
+            else:
+                avg_input_length = np.mean(input_lengths)
+                avg_target_length = np.mean(label_lengths)
+                max_input_length = np.max(input_lengths)
+                max_target_length = np.max(label_lengths)
+                min_input_length = np.min(input_lengths)
+                min_target_length = np.min(label_lengths)
+                
+                # Extrapolate to full dataset
+                total_input_tokens = int(avg_input_length * dataset_size)
+                total_target_tokens = int(avg_target_length * dataset_size)
+                
+                stats = {
+                    'num_examples': dataset_size,
+                    'avg_input_length': avg_input_length,
+                    'avg_target_length': avg_target_length,
+                    'max_input_length': max_input_length,
+                    'max_target_length': max_target_length,
+                    'min_input_length': min_input_length,
+                    'min_target_length': min_target_length,
+                    'total_input_tokens': total_input_tokens,
+                    'total_target_tokens': total_target_tokens,
+                    'total_tokens': total_input_tokens + total_target_tokens,
+                    'sampled': True,
+                    'sample_size': sample_size,
+                    'extrapolated': True
+                }
             
         else:
             # For smaller datasets, process all examples but in batches
@@ -293,20 +311,37 @@ class SummarizationDataLoader:
                     valid_count = sum(1 for l in labels if l != -100)
                     label_lengths.append(valid_count)
             
-            stats = {
-                'num_examples': len(dataset),
-                'avg_input_length': np.mean(input_lengths),
-                'avg_target_length': np.mean(label_lengths),
-                'max_input_length': np.max(input_lengths),
-                'max_target_length': np.max(label_lengths),
-                'min_input_length': np.min(input_lengths),
-                'min_target_length': np.min(label_lengths),
-                'total_input_tokens': sum(input_lengths),
-                'total_target_tokens': sum(label_lengths),
-                'total_tokens': sum(input_lengths) + sum(label_lengths),
-                'sampled': False,
-                'extrapolated': False
-            }
+            if not input_lengths or not label_lengths:
+                # Handle empty dataset case
+                stats = {
+                    'num_examples': 0,
+                    'avg_input_length': 0.0,
+                    'avg_target_length': 0.0,
+                    'max_input_length': 0,
+                    'max_target_length': 0,
+                    'min_input_length': 0,
+                    'min_target_length': 0,
+                    'total_input_tokens': 0,
+                    'total_target_tokens': 0,
+                    'total_tokens': 0,
+                    'sampled': False,
+                    'extrapolated': False
+                }
+            else:
+                stats = {
+                    'num_examples': len(dataset),
+                    'avg_input_length': np.mean(input_lengths),
+                    'avg_target_length': np.mean(label_lengths),
+                    'max_input_length': np.max(input_lengths),
+                    'max_target_length': np.max(label_lengths),
+                    'min_input_length': np.min(input_lengths),
+                    'min_target_length': np.min(label_lengths),
+                    'total_input_tokens': sum(input_lengths),
+                    'total_target_tokens': sum(label_lengths),
+                    'total_tokens': sum(input_lengths) + sum(label_lengths),
+                    'sampled': False,
+                    'extrapolated': False
+                }
         
         return stats
     
