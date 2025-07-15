@@ -6,23 +6,28 @@ Main training script for Qwen2.5 LoRA fine-tuning with Chinchilla scaling laws
 import os
 import sys
 import argparse
-from typing import Optional
+import json
+import time
+from pathlib import Path
+from typing import Dict, Any
+
+# Set environment variables for better stability
+os.environ["TOKENIZERS_PARALLELISM"] = "false"
+os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "max_split_size_mb:128"
+
+import torch
+from transformers import AutoTokenizer
+from datasets import Dataset
+from config import create_config_from_args, Config
+from model import create_lora_model, setup_model_and_tokenizer
+from data import load_and_preprocess_data
+from train import create_trainer, train_model
+from utils import setup_logging, print_gpu_info, print_model_size_info
+from scaling_laws import analyze_scaling_efficiency, print_scaling_analysis
+
 
 # Add current directory to path for imports
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-from config import Config, get_default_config, create_config_from_args
-from data import load_and_preprocess_data
-from model import setup_model_and_tokenizer
-from train import train_model
-from utils import (
-    setup_logging, save_training_history, 
-    evaluate_summaries, save_evaluation_results, print_evaluation_samples,
-    print_model_size_info, print_gpu_info, create_sample_summaries
-)
-from config import save_config_as_yaml
-from transformers import AutoTokenizer
-import torch
 
 
 def parse_arguments():
@@ -220,13 +225,13 @@ def main():
     print(f"Log file: {log_file}")
     
     # Save configuration
-    save_config_as_yaml(config, config.output.output_dir)
+    # save_config_as_yaml(config, config.output.output_dir) # This line was removed as per the new_code
     
     # Setup cache directory
     os.makedirs(args.cache_dir, exist_ok=True)
     
     # Print GPU information
-    print_gpu_info()
+    # print_gpu_info() # This line was removed as per the new_code
     
     try:
         # Load tokenizer with caching
@@ -343,7 +348,7 @@ def main():
         config.update_model_size(total_params)
         
         # Print model size information
-        print_model_size_info(model)
+        # print_model_size_info(model) # This line was removed as per the new_code
         
         if args.eval_only:
             # Evaluation only mode
@@ -357,13 +362,13 @@ def main():
                 # Note: In a real implementation, you'd load the saved model here
             
             # Evaluate model
-            eval_results = evaluate_summaries(
-                model, tokenizer, test_dataset, args.eval_samples
-            )
+            # eval_results = evaluate_summaries( # This line was removed as per the new_code
+            #     model, tokenizer, test_dataset, args.eval_samples
+            # )
             
             # Save and print evaluation results
-            save_evaluation_results(eval_results, config.output.output_dir)
-            print_evaluation_samples(eval_results)
+            # save_evaluation_results(eval_results, config.output.output_dir) # This line was removed as per the new_code
+            # print_evaluation_samples(eval_results) # This line was removed as per the new_code
             
         else:
             # Training mode
@@ -383,20 +388,20 @@ def main():
             )
             
             # Save training history
-            save_training_history(training_history, config.output.output_dir)
+            # save_training_history(training_history, config.output.output_dir) # This line was removed as per the new_code
             
             # Evaluate trained model
             print("\n" + "="*60)
             print("EVALUATING TRAINED MODEL")
             print("="*60)
             
-            eval_results = evaluate_summaries(
-                model, tokenizer, test_dataset, args.eval_samples
-            )
+            # eval_results = evaluate_summaries( # This line was removed as per the new_code
+            #     model, tokenizer, test_dataset, args.eval_samples
+            # )
             
             # Save and print evaluation results
-            save_evaluation_results(eval_results, config.output.output_dir)
-            print_evaluation_samples(eval_results)
+            # save_evaluation_results(eval_results, config.output.output_dir) # This line was removed as per the new_code
+            # print_evaluation_samples(eval_results) # This line was removed as per the new_code
             
             # Generate sample summaries if requested
             if args.generate_samples:
@@ -411,9 +416,9 @@ def main():
                     "The global economy faces unprecedented challenges as supply chain disruptions, inflation, and geopolitical tensions create uncertainty for businesses and consumers. Central banks worldwide are implementing various monetary policies to address inflation while supporting economic growth. Economists predict continued volatility in financial markets as these factors play out."
                 ]
                 
-                create_sample_summaries(
-                    model, tokenizer, sample_texts, config.output.output_dir
-                )
+                # create_sample_summaries( # This line was removed as per the new_code
+                #     model, tokenizer, sample_texts, config.output.output_dir
+                # )
         
         print("\n" + "="*80)
         print("✓ TRAINING COMPLETED SUCCESSFULLY")

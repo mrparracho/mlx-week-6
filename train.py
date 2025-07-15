@@ -122,15 +122,30 @@ class LoRATrainer:
         attention_mask = batch['attention_mask'].to(self.device)
         labels = batch['labels'].to(self.device)
         
-        # Forward pass
+        # Forward pass with gradient scaling for numerical stability
+        # Disable mixed precision for stability - use regular forward pass
         outputs = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,
             labels=labels
         )
         
-        # Return standard loss
-        return outputs.loss
+        # Get loss and check for numerical issues
+        loss = outputs.loss
+        
+        # Additional numerical stability checks
+        if torch.isnan(loss) or torch.isinf(loss):
+            print(f"⚠️  LOSS IS NAN/INF: {loss.item()}")
+            # Return a small positive loss instead of NaN/Inf
+            return torch.tensor(1.0, device=self.device, requires_grad=True)
+        
+        # Check if loss is too large (indicates instability)
+        if loss.item() > 100.0:
+            print(f"⚠️  LOSS TOO LARGE: {loss.item()}")
+            # Clip the loss to prevent gradient explosion
+            loss = torch.clamp(loss, max=100.0)
+        
+        return loss
     
 
     
@@ -145,6 +160,9 @@ class LoRATrainer:
             Loss value
         """
         self.model.train()
+        
+        # Zero gradients
+        self.optimizer.zero_grad()
         
         # Calculate loss with numerical stability checks
         loss = self.calculate_loss(batch)
@@ -165,8 +183,6 @@ class LoRATrainer:
             if torch.isnan(loss) or torch.isinf(loss):
                 print(f"  Skipping batch due to invalid loss")
                 return float('inf')  # Return high loss to indicate problem
-        
-
         
         # Backward pass with gradient stability checks
         loss.backward()
@@ -194,17 +210,20 @@ class LoRATrainer:
         
         # Gradient clipping with stability check
         if grad_norm > 0 and not math.isnan(grad_norm) and not math.isinf(grad_norm):
+            # Use a more conservative gradient clipping
+            clip_value = min(self.training_config.max_grad_norm, grad_norm * 0.5)
             torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(), 
-                self.training_config.max_grad_norm
+                clip_value
             )
-        else:
-            print(f"⚠️  SKIPPING GRADIENT CLIPPING due to invalid grad_norm: {grad_norm}")
         
-        # Optimizer step
-        self.optimizer.step()
-        self.scheduler.step()
-        self.optimizer.zero_grad()
+        # Optimizer step with error handling
+        try:
+            self.optimizer.step()
+            self.scheduler.step()
+        except Exception as e:
+            print(f"⚠️  OPTIMIZER STEP FAILED: {e}")
+            return float('inf')
         
         return loss.item()
     

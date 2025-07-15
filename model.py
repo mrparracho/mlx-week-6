@@ -22,6 +22,30 @@ except ImportError:
     print("Warning: bitsandbytes not available. Using full precision training.")
 
 
+def setup_numerical_stability():
+    """Set up numerical stability settings for different devices."""
+    # Set torch settings for better numerical stability
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.deterministic = True
+    
+    # Set default tensor type based on device
+    if torch.cuda.is_available():
+        # Use float32 for better stability on CUDA
+        torch.set_default_dtype(torch.float32)
+        # Enable gradient scaler for mixed precision if needed
+        torch.backends.cuda.matmul.allow_tf32 = False
+        torch.backends.cudnn.allow_tf32 = False
+        print("✓ CUDA numerical stability settings applied")
+    elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        # MPS settings
+        torch.set_default_dtype(torch.float32)
+        print("✓ MPS numerical stability settings applied")
+    else:
+        # CPU settings
+        torch.set_default_dtype(torch.float32)
+        print("✓ CPU numerical stability settings applied")
+
+
 class LoRAModel:
     """LoRA model wrapper for Qwen2.5 fine-tuning."""
     
@@ -30,6 +54,9 @@ class LoRAModel:
         self.lora_config = lora_config
         self.model = None
         self.tokenizer = None
+        
+        # Set up numerical stability
+        setup_numerical_stability()
         
     def load_base_model(self) -> AutoModelForCausalLM:
         """
@@ -50,6 +77,8 @@ class LoRAModel:
         # Set device map based on availability
         if torch.cuda.is_available():
             model_kwargs["device_map"] = self.model_config.device_map
+            # Use float32 for better stability on CUDA
+            model_kwargs["torch_dtype"] = torch.float32
         elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
             # Use MPS if available
             model_kwargs["device_map"] = "mps"
@@ -57,8 +86,8 @@ class LoRAModel:
             # Fall back to CPU
             model_kwargs["device_map"] = "cpu"
         
-        # Add quantization if bitsandbytes is available
-        if BITSANDBYTES_AVAILABLE:
+        # Add quantization if bitsandbytes is available and not on CUDA (for stability)
+        if BITSANDBYTES_AVAILABLE and not torch.cuda.is_available():
             print("Using 4-bit quantization for memory efficiency")
             bnb_config = BitsAndBytesConfig(
                 load_in_4bit=True,
@@ -68,7 +97,7 @@ class LoRAModel:
             )
             model_kwargs["quantization_config"] = bnb_config
         else:
-            print("Using full precision (no quantization available)")
+            print("Using full precision (no quantization available or disabled for CUDA stability)")
         
         # Load model
         model = AutoModelForCausalLM.from_pretrained(

@@ -41,20 +41,20 @@ class LoRAConfig:
 @dataclass
 class TrainingConfig:
     """Training configuration."""
-    learning_rate: float = 1e-6  # Reduced for better stability on CUDA
-    batch_size: int = 4
-    gradient_accumulation_steps: int = 8  # Increased for effective larger batch size
+    learning_rate: float = 5e-7  # Further reduced for better stability on CUDA
+    batch_size: int = 1  # Reduced for CUDA stability
+    gradient_accumulation_steps: int = 16  # Increased for effective larger batch size
     max_epochs: int = 3
-    warmup_steps: int = 100
+    warmup_steps: int = 50  # Reduced warmup for smaller effective batch size
     weight_decay: float = 0.01
-    max_grad_norm: float = 0.5  # Reduced for better stability
+    max_grad_norm: float = 0.3  # Further reduced for better stability
     save_steps: int = 500
     eval_steps: int = 500
     logging_steps: int = 10
     save_total_limit: int = 3
     remove_unused_columns: bool = False
     dataloader_pin_memory: bool = False
-    dataloader_num_workers: int = 4
+    dataloader_num_workers: int = 0  # Reduced for stability
     
     # Memory and stability settings
     dataloader_drop_last: bool = True  # Drop incomplete batches
