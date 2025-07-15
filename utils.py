@@ -101,52 +101,62 @@ def save_training_history(history: Dict[str, Any], output_dir: str):
 def generate_summary(model, tokenizer: AutoTokenizer, text: str, 
                     max_length: int = 128, temperature: float = 0.7) -> str:
     """
-    Generate summary for given text.
+    Generate a summary for the given text.
     
     Args:
         model: Trained model
         tokenizer: Tokenizer
         text: Input text to summarize
-        max_length: Maximum length of summary
+        max_length: Maximum length of generated summary
         temperature: Sampling temperature
         
     Returns:
         Generated summary
     """
-    # Prepare input
-    input_text = f"Summarize: {text}"
-    
-    # Tokenize input
-    inputs = tokenizer(
-        input_text,
-        return_tensors="pt",
-        truncation=True,
-        max_length=1024
-    )
-    
-    # Move to device
-    device = next(model.parameters()).device
-    inputs = {k: v.to(device) for k, v in inputs.items()}
-    
-    # Generate summary
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_length=max_length,
-            temperature=temperature,
-            do_sample=True,
-            pad_token_id=tokenizer.eos_token_id,
-            eos_token_id=tokenizer.eos_token_id
+    try:
+        # Tokenize input - NO TRUNCATION
+        inputs = tokenizer(
+            text,
+            return_tensors="pt",
+            truncation=False,  # No truncation
+            padding=True
         )
-    
-    # Decode output
-    summary = tokenizer.decode(outputs[0], skip_special_tokens=True)
-    
-    # Remove input text from output
-    if summary.startswith(input_text):
-        summary = summary[len(input_text):].strip()
-    
-    return summary
+        
+        # Move to device
+        device = next(model.parameters()).device
+        inputs = {k: v.to(device) for k, v in inputs.items()}
+        
+        # Generate with error handling
+        with torch.no_grad():
+            try:
+                outputs = model.generate(
+                    **inputs,
+                    max_new_tokens=max_length,
+                    temperature=temperature,
+                    do_sample=True,
+                    pad_token_id=tokenizer.eos_token_id,
+                    eos_token_id=tokenizer.eos_token_id
+                )
+                
+                # Decode the generated text
+                generated_text = tokenizer.decode(
+                    outputs[0][inputs['input_ids'].shape[1]:], 
+                    skip_special_tokens=True
+                )
+                
+                return generated_text.strip()
+                
+            except RuntimeError as e:
+                if "probability tensor contains" in str(e) or "device-side assert" in str(e):
+                    print(f"⚠️  Model produced invalid probabilities. This usually means the model wasn't trained properly.")
+                    print(f"   Error: {str(e)}")
+                    return "[ERROR: Model not properly trained - invalid probabilities]"
+                else:
+                    raise e
+                    
+    except Exception as e:
+        print(f"⚠️  Error during generation: {str(e)}")
+        return f"[ERROR: {str(e)}]"
 
 
 def evaluate_summaries(model, tokenizer: AutoTokenizer, 
