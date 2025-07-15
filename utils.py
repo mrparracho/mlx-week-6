@@ -114,20 +114,21 @@ def generate_summary(model, tokenizer, text: str,
         Generated summary
     """
     try:
-        # Set padding token if not already set
+        # Set padding token if not already set - use a safe approach
         if not hasattr(tokenizer, 'pad_token') or tokenizer.pad_token is None:
+            # Try to use eos_token as pad_token
             if hasattr(tokenizer, 'eos_token') and tokenizer.eos_token is not None:
                 tokenizer.pad_token = tokenizer.eos_token
             else:
-                # Add a new pad token
-                tokenizer.add_special_tokens({'pad_token': '[PAD]'})
+                # Use a default pad token ID (usually 0)
+                tokenizer.pad_token_id = 0
         
-        # Tokenize input - NO TRUNCATION
+        # Tokenize input - NO TRUNCATION, NO PADDING
         inputs = tokenizer(
             text,
             return_tensors="pt",
-            truncation=False,  # No truncation
-            padding=True
+            truncation=False,
+            padding=False  # Don't pad during tokenization
         )
         
         # Move to device
@@ -142,8 +143,8 @@ def generate_summary(model, tokenizer, text: str,
                     max_new_tokens=max_length,
                     temperature=temperature,
                     do_sample=True,
-                    pad_token_id=tokenizer.pad_token_id,
-                    eos_token_id=tokenizer.eos_token_id
+                    pad_token_id=getattr(tokenizer, 'pad_token_id', 0),
+                    eos_token_id=getattr(tokenizer, 'eos_token_id', None)
                 )
                 
                 # Decode the generated text
