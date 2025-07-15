@@ -162,7 +162,7 @@ class SummarizationDataLoader:
             return 4  # Fallback if CPU count can't be determined
         
         # Use 80% of available cores, with bounds
-        optimal_procs = max(1, min(int(total_cores * 0.8), 16))
+        optimal_procs = max(1, min(int(total_cores * 0.8), 64))
         return optimal_procs
 
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:

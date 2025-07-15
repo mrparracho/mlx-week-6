@@ -1,0 +1,1 @@
+nohup uv run python main.py --model_name Qwen/Qwen2.5-0.5B --epochs 1 --batch_size 1 --learning_rate 1e-3 --force_reload > training.log 2>&1 &
