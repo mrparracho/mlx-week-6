@@ -27,8 +27,8 @@ class LoRATrainer:
         self.chinchilla_config = chinchilla_config
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
-        # Move model to device
-        self.model.to(self.device)
+        # Move model to device (use to_empty for meta tensors)
+        self.model.to_empty(device=self.device)
         
         # Training state
         self.global_step = 0

@@ -30,7 +30,8 @@ class LoRAConfig:
     
     def __post_init__(self):
         if self.target_modules is None:
-            self.target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"]
+            # QWEN uses c_attn (combined q,k,v) and c_proj (output projection)
+            self.target_modules = ["c_attn", "c_proj"]
         if self.alpha is None:
             self.alpha = 2 * self.rank
 
