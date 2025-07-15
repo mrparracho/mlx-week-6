@@ -52,13 +52,14 @@ class SummarizationDataLoader:
             if self.debug_mode:
                 print(f"🔧 DEBUG MODE: Sampling {self.sample_size} examples from each split")
                 
-                # Sample from each split
+                # Sample from each split - ensure at least 1 example for validation and test
                 train_indices = random.sample(range(len(train_dataset)), 
                                             min(self.sample_size, len(train_dataset)))
-                val_indices = random.sample(range(len(validation_dataset)), 
-                                          min(self.sample_size // 10, len(validation_dataset)))
-                test_indices = random.sample(range(len(test_dataset)), 
-                                           min(self.sample_size // 10, len(test_dataset)))
+                val_sample_size = max(1, min(self.sample_size // 10, len(validation_dataset)))
+                test_sample_size = max(1, min(self.sample_size // 10, len(test_dataset)))
+                
+                val_indices = random.sample(range(len(validation_dataset)), val_sample_size)
+                test_indices = random.sample(range(len(test_dataset)), test_sample_size)
                 
                 train_dataset = train_dataset.select(train_indices)
                 validation_dataset = validation_dataset.select(val_indices)
