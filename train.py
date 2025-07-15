@@ -375,10 +375,7 @@ class LoRATrainer:
                     'lr': f'{self.scheduler.get_last_lr()[0]:.2e}'
                 })
                 
-                # Logging
-                if self.global_step % self.training_config.logging_steps == 0:
-                    avg_loss = np.mean(epoch_losses[-self.training_config.logging_steps:])
-                    print(f"Step {self.global_step}: Loss = {avg_loss:.4f}")
+
                 
                 # Validation
                 if self.global_step % self.training_config.eval_steps == 0:
