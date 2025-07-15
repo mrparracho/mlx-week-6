@@ -169,10 +169,15 @@ class LoRATrainer:
                 print(f"  Input shape: {input_ids.shape}, Labels shape: {labels.shape}")
                 # Check for any inf values in the model outputs
                 with torch.no_grad():
+                    # Move tensors to device for debugging
+                    input_ids_debug = input_ids.to(self.device)
+                    attention_mask_debug = attention_mask.to(self.device)
+                    labels_debug = labels.to(self.device)
+                    
                     outputs = self.model(
-                        input_ids=input_ids,
-                        attention_mask=attention_mask,
-                        labels=labels
+                        input_ids=input_ids_debug,
+                        attention_mask=attention_mask_debug,
+                        labels=labels_debug
                     )
                     if hasattr(outputs, 'logits'):
                         logits = outputs.logits
