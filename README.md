@@ -106,6 +106,18 @@ Run the example script for guided usage:
 python example_usage.py
 ```
 
+### Testing Boundary Detection
+
+Test the boundary detection functionality:
+
+```bash
+# Test boundary detection loss calculation
+python test_boundary_detection.py
+
+# Demonstrate boundary detection in training
+python example_boundary_training.py
+```
+
 ## Training
 
 ### LoRA Configuration
@@ -126,12 +138,38 @@ The training incorporates Chinchilla scaling laws for optimal compute efficiency
 
 ### Training Process
 
-1. **Data Preprocessing**: CNN/DailyMail articles are formatted with "Summarize: " prefix
+1. **Data Preprocessing**: CNN/DailyMail articles are formatted with "Summarize: " prefix and "\nTarget:" for summaries
 2. **Tokenization**: Input and target texts are tokenized with QWEN tokenizer
-3. **LoRA Application**: Low-rank adapters are applied to attention layers
-4. **Training Loop**: Supervised fine-tuning with gradient accumulation
-5. **Validation**: Regular evaluation on validation set
-6. **Checkpointing**: Automatic saving of best models
+3. **Boundary Detection**: Automatic detection of input/target boundaries for enhanced loss calculation
+4. **LoRA Application**: Low-rank adapters are applied to attention layers
+5. **Training Loop**: Supervised fine-tuning with gradient accumulation and boundary-aware loss
+6. **Validation**: Regular evaluation on validation set
+7. **Checkpointing**: Automatic saving of best models
+
+### Boundary Detection
+
+The training incorporates intelligent boundary detection to improve the model's ability to learn the transition from input context to target generation:
+
+- **Automatic Boundary Detection**: Identifies transitions from input tokens (marked with -100) to target tokens
+- **Enhanced Loss Calculation**: Applies higher loss weights to boundary positions to improve transition learning
+- **Smooth Transition Window**: Configurable window size for gradual transition learning
+- **Configurable Weights**: Adjustable boundary loss weight and position weight for fine-tuning
+- **Clear Delimiters**: Uses "Summarize: " prefix for input and "\nTarget:" prefix for summaries
+
+**Configuration Options:**
+```python
+# Enable/disable boundary detection
+use_boundary_detection: bool = True
+
+# Weight for boundary loss component (default: 0.1)
+boundary_loss_weight: float = 0.1
+
+# Weight multiplier for boundary positions (default: 2.0)
+boundary_position_weight: float = 2.0
+
+# Number of positions after boundary for smooth transition (default: 4)
+boundary_smooth_window: int = 4
+```
 
 ## Model Architecture
 

@@ -108,7 +108,7 @@ class LoRATrainer:
     
     def calculate_loss(self, batch: Dict) -> torch.Tensor:
         """
-        Calculate loss for a batch.
+        Calculate loss for a batch with boundary detection.
         
         Args:
             batch: Batch of data
@@ -128,7 +128,114 @@ class LoRATrainer:
             labels=labels
         )
         
-        return outputs.loss
+        # Get logits and apply boundary detection for enhanced loss calculation
+        logits = outputs.logits  # Shape: (batch_size, seq_len, vocab_size)
+        
+        # Apply boundary detection to enhance loss calculation if enabled
+        if self.training_config.use_boundary_detection:
+            enhanced_loss = self._calculate_boundary_aware_loss(
+                logits=logits,
+                labels=labels,
+                attention_mask=attention_mask
+            )
+            return enhanced_loss
+        else:
+            # Use standard loss if boundary detection is disabled
+            return outputs.loss
+    
+    def _calculate_boundary_aware_loss(self, logits: torch.Tensor, 
+                                     labels: torch.Tensor, 
+                                     attention_mask: torch.Tensor) -> torch.Tensor:
+        """
+        Calculate loss with boundary detection awareness.
+        
+        Args:
+            logits: Model output logits (batch_size, seq_len, vocab_size)
+            labels: Ground truth labels (batch_size, seq_len)
+            attention_mask: Attention mask (batch_size, seq_len)
+            
+        Returns:
+            Enhanced loss tensor
+        """
+        batch_size, seq_len, vocab_size = logits.shape
+        
+        # Standard cross-entropy loss
+        ce_loss = torch.nn.functional.cross_entropy(
+            logits.view(-1, vocab_size),
+            labels.view(-1),
+            ignore_index=-100,
+            reduction='none'
+        ).view(batch_size, seq_len)
+        
+        # Apply attention mask to zero out padding positions
+        ce_loss = ce_loss * attention_mask
+        
+        # Calculate boundary-aware loss components
+        boundary_loss = self._calculate_boundary_loss(logits, labels, attention_mask)
+        
+        # Combine losses with weights
+        total_loss = ce_loss + self.training_config.boundary_loss_weight * boundary_loss
+        
+        # Average over valid positions
+        valid_positions = (labels != -100) & (attention_mask == 1)
+        if valid_positions.sum() > 0:
+            return total_loss[valid_positions].mean()
+        else:
+            return total_loss.mean()
+    
+    def _calculate_boundary_loss(self, logits: torch.Tensor, 
+                               labels: torch.Tensor, 
+                               attention_mask: torch.Tensor) -> torch.Tensor:
+        """
+        Calculate boundary-specific loss to improve transition learning.
+        
+        Args:
+            logits: Model output logits
+            labels: Ground truth labels
+            attention_mask: Attention mask
+            
+        Returns:
+            Boundary loss tensor
+        """
+        batch_size, seq_len, vocab_size = logits.shape
+        
+        # Find boundary positions (where labels transition from -100 to actual tokens)
+        boundary_positions = torch.zeros_like(labels, dtype=torch.bool)
+        
+        for b in range(batch_size):
+            for i in range(1, seq_len):
+                # Check if this is a boundary: previous was -100, current is not -100
+                if labels[b, i-1] == -100 and labels[b, i] != -100:
+                    boundary_positions[b, i] = True
+                    # Also mark a few positions after the boundary for smooth transition
+                    for j in range(1, min(self.training_config.boundary_smooth_window, seq_len - i)):
+                        if i + j < seq_len and labels[b, i + j] != -100:
+                            boundary_positions[b, i + j] = True
+        
+        # Apply higher loss weight to boundary positions
+        boundary_weight = self.training_config.boundary_position_weight
+        
+        # Create weight tensor
+        weights = torch.ones_like(labels, dtype=torch.float)
+        weights[boundary_positions] = boundary_weight
+        
+        # Apply weights to cross-entropy loss
+        ce_loss = torch.nn.functional.cross_entropy(
+            logits.view(-1, vocab_size),
+            labels.view(-1),
+            ignore_index=-100,
+            reduction='none'
+        ).view(batch_size, seq_len)
+        
+        # Apply weights and attention mask
+        weighted_loss = ce_loss * weights * attention_mask
+        
+        # Average over valid positions
+        valid_positions = (labels != -100) & (attention_mask == 1)
+        if valid_positions.sum() > 0:
+            return weighted_loss[valid_positions].mean()
+        else:
+            return weighted_loss.mean()
     
     def train_step(self, batch: Dict) -> float:
         """
@@ -154,6 +261,18 @@ class LoRATrainer:
             print(f"  Non-100 labels: {(labels != -100).sum().item()}")
             print(f"  Sample input_ids: {input_ids[0, :10].tolist()}")
             print(f"  Sample labels: {labels[0, :10].tolist()}")
+            
+            # Debug boundary detection
+            if self.training_config.use_boundary_detection:
+                print(f"  🔍 Boundary Detection: ENABLED")
+                # Find boundary positions in first example
+                boundary_pos = []
+                for i in range(1, min(20, labels.shape[1])):  # Check first 20 positions
+                    if labels[0, i-1] == -100 and labels[0, i] != -100:
+                        boundary_pos.append(i)
+                print(f"  Boundary positions: {boundary_pos}")
+            else:
+                print(f"  🔍 Boundary Detection: DISABLED")
         
         # Calculate loss
         loss = self.calculate_loss(batch)

@@ -54,6 +54,12 @@ class TrainingConfig:
     remove_unused_columns: bool = False
     dataloader_pin_memory: bool = False
     dataloader_num_workers: int = 4
+    
+    # Boundary detection configuration
+    use_boundary_detection: bool = True
+    boundary_loss_weight: float = 0.1
+    boundary_position_weight: float = 2.0
+    boundary_smooth_window: int = 4
 
 
 @dataclass
@@ -70,7 +76,7 @@ class DataConfig:
     validation_split: str = "validation"
     test_split: str = "test"
     input_prefix: str = "Summarize: "
-    target_prefix: str = ""
+    target_prefix: str = "\nTarget:"
 
 
 @dataclass
@@ -167,12 +173,18 @@ class Config:
         print(f"  Max Epochs: {self.training.max_epochs}")
         print(f"  Warmup Steps: {self.training.warmup_steps}")
         print(f"  Weight Decay: {self.training.weight_decay}")
+        print(f"  Use Boundary Detection: {self.training.use_boundary_detection}")
+        if self.training.use_boundary_detection:
+            print(f"  Boundary Loss Weight: {self.training.boundary_loss_weight}")
+            print(f"  Boundary Position Weight: {self.training.boundary_position_weight}")
+            print(f"  Boundary Smooth Window: {self.training.boundary_smooth_window}")
         
         print(f"\nDATA:")
         print(f"  Dataset: {self.data.dataset_name}")
         print(f"  Max Input Length: {self.data.max_input_length}")
         print(f"  Max Target Length: {self.data.max_target_length}")
         print(f"  Input Prefix: '{self.data.input_prefix}'")
+        print(f"  Target Prefix: '{self.data.target_prefix}'")
         
         print(f"\nCHINCHILLA SCALING:")
         print(f"  Apply Scaling Laws: {self.chinchilla.apply_scaling_laws}")
