@@ -24,7 +24,7 @@ class SummarizationDataLoader:
         self.tokenizer = tokenizer
         self.debug_mode = debug_mode
         self.sample_size = sample_size
-        
+        self._tokenizer_cache = {}  # For optional caching
         if debug_mode and sample_size is None:
             self.sample_size = 100  # Default sample size for debugging
     
@@ -107,74 +107,38 @@ class SummarizationDataLoader:
     
     def tokenize_function(self, examples: Dict) -> Dict:
         """
-        Tokenize input and target texts for causal LM training.
-        
-        Args:
-            examples: Batch of examples
-            
-        Returns:
-            Tokenized examples
+        Optimized tokenization function for causal LM training (no truncation).
         """
-        processed_texts = []
-        input_texts = []
-        target_texts = []
-        model_max_length = getattr(self.tokenizer, 'model_max_length', 2048)  # fallback to 2048 if not set
-        
-        for input_text, target_text in zip(examples['input'], examples['target']):
-            # Use the existing format: "Summarize: [article] [summary]"
-            # Just concatenate input and target as they are
-            combined_text = input_text + " " + target_text
-            
-            # Tokenize to check length
-            combined_tokens = self.tokenizer(
-                combined_text,
-                add_special_tokens=False,
-                return_tensors=None
-            )
-            if len(combined_tokens['input_ids']) > model_max_length:
-                print(f"[WARNING] Sequence length {len(combined_tokens['input_ids'])} exceeds model max length {model_max_length}. Truncating.")
-                # Truncate from the left (keep the end, which includes the summary)
-                truncated_ids = combined_tokens['input_ids'][-model_max_length:]
-                combined_text = self.tokenizer.decode(truncated_ids, skip_special_tokens=True)
-            
-            processed_texts.append(combined_text)
-            input_texts.append(input_text)
-            target_texts.append(target_text)
-
-        # Tokenize the processed texts (no truncation, no padding)
-        tokenized = self.tokenizer(
-            processed_texts,
+        model_max_length = getattr(self.tokenizer, 'model_max_length', 2048)
+        input_texts = examples['input']
+        target_texts = examples['target']
+        # Pre-tokenize input texts to find boundaries efficiently
+        input_tokenized = self.tokenizer(
+            input_texts,
             add_special_tokens=False,
             padding=False,
+            truncation=False,
+            return_tensors=None
+        )
+        # Combine texts efficiently
+        combined_texts = [f"{input_text} {target_text}" for input_text, target_text in zip(input_texts, target_texts)]
+        # Tokenize combined texts in one batch operation (no truncation)
+        tokenized = self.tokenizer(
+            combined_texts,
+            add_special_tokens=False,
+            padding=False,
+            truncation=False,
             return_attention_mask=True,
             return_tensors=None
         )
-
+        # Create labels efficiently
         labels = []
-        for input_text, target_text, input_ids in zip(input_texts, target_texts, tokenized['input_ids']):
-            # Find the boundary by looking for "Summarize:" in the tokenized text
-            decoded_text = self.tokenizer.decode(input_ids, skip_special_tokens=True)
-            
-            # Find where the article ends (after "Summarize: [article]")
-            # The target starts after the input_text part
-            input_tokens = self.tokenizer(
-                input_text,
-                add_special_tokens=False,
-                return_tensors=None
-            )
-            input_len = len(input_tokens['input_ids'])
-            
-            # Create labels with the same length as input_ids
+        input_lengths = [len(ids) for ids in input_tokenized['input_ids']]
+        for input_ids, input_len in zip(tokenized['input_ids'], input_lengths):
             label = [-100] * len(input_ids)
-            
-            # Set labels for target tokens (after the input part)
             boundary = min(input_len, len(input_ids))
-            for i in range(boundary, len(input_ids)):
-                if i < len(input_ids):
-                    label[i] = input_ids[i]
-            
+            label[boundary:] = input_ids[boundary:]
             labels.append(label)
-
         return {
             'input_ids': tokenized['input_ids'],
             'attention_mask': tokenized['attention_mask'],
@@ -182,32 +146,20 @@ class SummarizationDataLoader:
         }
     
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
-        """
-        Preprocess dataset for training.
-        
-        Args:
-            dataset: Raw dataset
-            
-        Returns:
-            Preprocessed dataset
-        """
         print("Preprocessing dataset...")
-        
-        # Format for summarization
         formatted_dataset = dataset.map(
             self.format_for_summarization,
             remove_columns=dataset.column_names,
             desc="Formatting for summarization"
         )
-        
-        # Tokenize
         tokenized_dataset = formatted_dataset.map(
             self.tokenize_function,
             batched=True,
+            batch_size=1000,
+            num_proc=4,
             remove_columns=formatted_dataset.column_names,
             desc="Tokenizing"
         )
-        
         print("✓ Dataset preprocessing completed")
         return tokenized_dataset
     
