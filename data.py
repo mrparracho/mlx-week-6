@@ -12,15 +12,22 @@ from tqdm import tqdm
 from config import DataConfig
 import torch
 from torch.nn.utils.rnn import pad_sequence
+import random
 
 
 class SummarizationDataLoader:
     """Data loader for summarization tasks."""
     
-    def __init__(self, config: DataConfig, tokenizer: PreTrainedTokenizer):
+    def __init__(self, config: DataConfig, tokenizer: PreTrainedTokenizer, 
+                 debug_mode: bool = False, sample_size: Optional[int] = None):
         self.config = config
         self.tokenizer = tokenizer
+        self.debug_mode = debug_mode
+        self.sample_size = sample_size
         
+        if debug_mode and sample_size is None:
+            self.sample_size = 100  # Default sample size for debugging
+    
     def load_cnn_dailymail_dataset(self) -> Tuple[Dataset, Dataset, Dataset]:
         """
         Load CNN/DailyMail dataset.
@@ -41,9 +48,29 @@ class SummarizationDataLoader:
             validation_dataset = dataset[self.config.validation_split]
             test_dataset = dataset[self.config.test_split]
             
-            print(f"✓ Loaded {len(train_dataset)} training examples")
-            print(f"✓ Loaded {len(validation_dataset)} validation examples")
-            print(f"✓ Loaded {len(test_dataset)} test examples")
+            # Apply sampling if in debug mode
+            if self.debug_mode:
+                print(f"🔧 DEBUG MODE: Sampling {self.sample_size} examples from each split")
+                
+                # Sample from each split
+                train_indices = random.sample(range(len(train_dataset)), 
+                                            min(self.sample_size, len(train_dataset)))
+                val_indices = random.sample(range(len(validation_dataset)), 
+                                          min(self.sample_size // 10, len(validation_dataset)))
+                test_indices = random.sample(range(len(test_dataset)), 
+                                           min(self.sample_size // 10, len(test_dataset)))
+                
+                train_dataset = train_dataset.select(train_indices)
+                validation_dataset = validation_dataset.select(val_indices)
+                test_dataset = test_dataset.select(test_indices)
+                
+                print(f"✓ Sampled {len(train_dataset)} training examples")
+                print(f"✓ Sampled {len(validation_dataset)} validation examples")
+                print(f"✓ Sampled {len(test_dataset)} test examples")
+            else:
+                print(f"✓ Loaded {len(train_dataset)} training examples")
+                print(f"✓ Loaded {len(validation_dataset)} validation examples")
+                print(f"✓ Loaded {len(test_dataset)} test examples")
             
             return train_dataset, validation_dataset, test_dataset
             
@@ -88,36 +115,52 @@ class SummarizationDataLoader:
         Returns:
             Tokenized examples
         """
-        combined_texts = []
-        input_lengths = []
+        processed_texts = []
+        input_texts = []
+        target_texts = []
+        model_max_length = getattr(self.tokenizer, 'model_max_length', 2048)  # fallback to 2048 if not set
+        
         for input_text, target_text in zip(examples['input'], examples['target']):
+            # No truncation: allow full input and target
             combined_text = input_text + " " + target_text
-            combined_texts.append(combined_text)
-            # Tokenize input only to get its length
-            input_tokens = self.tokenizer(
-                input_text,
+            # Tokenize to check length
+            combined_tokens = self.tokenizer(
+                combined_text,
                 add_special_tokens=False,
                 return_tensors=None
             )
-            input_lengths.append(len(input_tokens['input_ids']))
+            if len(combined_tokens['input_ids']) > model_max_length:
+                print(f"[WARNING] Sequence length {len(combined_tokens['input_ids'])} exceeds model max length {model_max_length}. Truncating.")
+                # Truncate from the left (keep the end, which includes the target)
+                truncated_ids = combined_tokens['input_ids'][-model_max_length:]
+                combined_text = self.tokenizer.decode(truncated_ids, skip_special_tokens=True)
+            processed_texts.append(combined_text)
+            input_texts.append(input_text)
+            target_texts.append(target_text)
 
-        # Tokenize combined texts
+        # Tokenize the processed texts (no truncation, no padding)
         tokenized = self.tokenizer(
-            combined_texts,
-            max_length=self.config.max_input_length + self.config.max_target_length,
-            truncation=self.config.truncation,
-            padding=False
+            processed_texts,
+            add_special_tokens=False,
+            padding=False,
+            return_attention_mask=True,
+            return_tensors=None
         )
 
         labels = []
-        for input_len, input_ids in zip(input_lengths, tokenized['input_ids']):
-            # -100 for input tokens, actual ids for target tokens
-            label = [-100] * input_len + input_ids[input_len:]
-            # Truncate or pad to match input_ids length
-            if len(label) > len(input_ids):
-                label = label[:len(input_ids)]
-            elif len(label) < len(input_ids):
-                label += [-100] * (len(input_ids) - len(label))
+        for input_text, target_text, input_ids in zip(input_texts, target_texts, tokenized['input_ids']):
+            # Find the boundary between input and target by tokenizing input + space
+            input_with_space = input_text + " "
+            input_tokens = self.tokenizer(
+                input_with_space,
+                add_special_tokens=False,
+                return_tensors=None
+            )
+            input_len = len(input_tokens['input_ids'])
+            # Create labels with the same length as input_ids
+            label = [-100] * len(input_ids)
+            for i in range(input_len, len(input_ids)):
+                label[i] = input_ids[i]
             labels.append(label)
 
         return {
@@ -166,29 +209,42 @@ class SummarizationDataLoader:
         Returns:
             Dictionary with statistics
         """
-        # For very large datasets, use sampling to estimate statistics
         dataset_size = len(dataset)
         
-        if dataset_size > 10000:
-            # Use sampling for very large datasets
-            import random
-            sample_size = min(5000, dataset_size // 10)  # Sample 10% or 5000, whichever is smaller
+        # Determine if we should use sampling
+        use_sampling = dataset_size > 10000 or self.debug_mode
+        
+        if use_sampling:
+            # Use sampling for very large datasets or debug mode
+            if self.debug_mode and self.sample_size:
+                sample_size = min(self.sample_size, dataset_size)
+                desc = f"Calculating statistics (debug sample: {sample_size})"
+            else:
+                sample_size = min(5000, dataset_size // 10)  # Sample 10% or 5000, whichever is smaller
+                desc = f"Calculating statistics (sampled: {sample_size})"
+            
             sample_indices = random.sample(range(dataset_size), sample_size)
             sample_dataset = dataset.select(sample_indices)
             
             input_lengths = []
             label_lengths = []
             
-            for example in tqdm(sample_dataset, desc="Calculating statistics (sampled)"):
+            for example in tqdm(sample_dataset, desc=desc):
                 input_lengths.append(len(example['input_ids']))
                 # Count non-padding labels efficiently
                 labels = example['labels']
                 valid_count = sum(1 for l in labels if l != -100)
                 label_lengths.append(valid_count)
             
-            # Extrapolate to full dataset
+            # Calculate sample statistics
             avg_input_length = np.mean(input_lengths)
             avg_target_length = np.mean(label_lengths)
+            max_input_length = np.max(input_lengths)
+            max_target_length = np.max(label_lengths)
+            min_input_length = np.min(input_lengths)
+            min_target_length = np.min(label_lengths)
+            
+            # Extrapolate to full dataset
             total_input_tokens = int(avg_input_length * dataset_size)
             total_target_tokens = int(avg_target_length * dataset_size)
             
@@ -196,13 +252,16 @@ class SummarizationDataLoader:
                 'num_examples': dataset_size,
                 'avg_input_length': avg_input_length,
                 'avg_target_length': avg_target_length,
-                'max_input_length': np.max(input_lengths),
-                'max_target_length': np.max(label_lengths),
-                'min_input_length': np.min(input_lengths),
-                'min_target_length': np.min(label_lengths),
+                'max_input_length': max_input_length,
+                'max_target_length': max_target_length,
+                'min_input_length': min_input_length,
+                'min_target_length': min_target_length,
                 'total_input_tokens': total_input_tokens,
                 'total_target_tokens': total_target_tokens,
-                'total_tokens': total_input_tokens + total_target_tokens
+                'total_tokens': total_input_tokens + total_target_tokens,
+                'sampled': True,
+                'sample_size': sample_size,
+                'extrapolated': True
             }
             
         else:
@@ -232,7 +291,9 @@ class SummarizationDataLoader:
                 'min_target_length': np.min(label_lengths),
                 'total_input_tokens': sum(input_lengths),
                 'total_target_tokens': sum(label_lengths),
-                'total_tokens': sum(input_lengths) + sum(label_lengths)
+                'total_tokens': sum(input_lengths) + sum(label_lengths),
+                'sampled': False,
+                'extrapolated': False
             }
         
         return stats
@@ -251,6 +312,8 @@ class SummarizationDataLoader:
         print(f"  Avg Input Length: {train_stats['avg_input_length']:.1f} tokens")
         print(f"  Avg Target Length: {train_stats['avg_target_length']:.1f} tokens")
         print(f"  Total Tokens: {train_stats['total_tokens']:,}")
+        if train_stats.get('sampled'):
+            print(f"  📊 Sampled: {train_stats['sample_size']} examples (extrapolated)")
         
         # Validation dataset stats
         val_stats = self.get_dataset_statistics(val_dataset)
@@ -259,6 +322,8 @@ class SummarizationDataLoader:
         print(f"  Avg Input Length: {val_stats['avg_input_length']:.1f} tokens")
         print(f"  Avg Target Length: {val_stats['avg_target_length']:.1f} tokens")
         print(f"  Total Tokens: {val_stats['total_tokens']:,}")
+        if val_stats.get('sampled'):
+            print(f"  📊 Sampled: {val_stats['sample_size']} examples (extrapolated)")
         
         # Test dataset stats
         test_stats = self.get_dataset_statistics(test_dataset)
@@ -267,6 +332,8 @@ class SummarizationDataLoader:
         print(f"  Avg Input Length: {test_stats['avg_input_length']:.1f} tokens")
         print(f"  Avg Target Length: {test_stats['avg_target_length']:.1f} tokens")
         print(f"  Total Tokens: {test_stats['total_tokens']:,}")
+        if test_stats.get('sampled'):
+            print(f"  📊 Sampled: {test_stats['sample_size']} examples (extrapolated)")
         
         # Overall stats
         total_examples = train_stats['num_examples'] + val_stats['num_examples'] + test_stats['num_examples']
@@ -277,36 +344,50 @@ class SummarizationDataLoader:
         print(f"  Total Tokens: {total_tokens:,}")
         print(f"  Tokens per Example: {total_tokens/total_examples:.1f}")
         
+        # Show sampling info if any dataset was sampled
+        if any(stats.get('sampled', False) for stats in [train_stats, val_stats, test_stats]):
+            print(f"\n📊 SAMPLING INFO:")
+            print(f"  Debug Mode: {'Yes' if self.debug_mode else 'No'}")
+            if self.debug_mode and self.sample_size:
+                print(f"  Sample Size: {self.sample_size}")
+            print(f"  Statistics are extrapolated from samples")
+        
         print("="*60)
 
 
-def create_data_loader(config: DataConfig, tokenizer: PreTrainedTokenizer) -> SummarizationDataLoader:
+def create_data_loader(config: DataConfig, tokenizer: PreTrainedTokenizer, 
+                      debug_mode: bool = False, sample_size: Optional[int] = None) -> SummarizationDataLoader:
     """
     Create a data loader instance.
     
     Args:
         config: Data configuration
         tokenizer: Tokenizer for text processing
+        debug_mode: Whether to use debug mode with sampling
+        sample_size: Size of sample to use in debug mode
         
     Returns:
         SummarizationDataLoader instance
     """
-    return SummarizationDataLoader(config, tokenizer)
+    return SummarizationDataLoader(config, tokenizer, debug_mode, sample_size)
 
 
-def load_and_preprocess_data(config: DataConfig, tokenizer: PreTrainedTokenizer) -> Tuple[Dataset, Dataset, Dataset]:
+def load_and_preprocess_data(config: DataConfig, tokenizer: PreTrainedTokenizer,
+                           debug_mode: bool = False, sample_size: Optional[int] = None) -> Tuple[Dataset, Dataset, Dataset]:
     """
     Load and preprocess the CNN/DailyMail dataset.
     
     Args:
         config: Data configuration
         tokenizer: Tokenizer for text processing
+        debug_mode: Whether to use debug mode with sampling
+        sample_size: Size of sample to use in debug mode
         
     Returns:
         Tuple of (train_dataset, validation_dataset, test_dataset)
     """
     # Create data loader
-    data_loader = create_data_loader(config, tokenizer)
+    data_loader = create_data_loader(config, tokenizer, debug_mode, sample_size)
     
     # Load raw datasets
     train_raw, val_raw, test_raw = data_loader.load_cnn_dailymail_dataset()
@@ -323,43 +404,21 @@ def load_and_preprocess_data(config: DataConfig, tokenizer: PreTrainedTokenizer)
 
 
 def collate_fn(batch, pad_token_id=0):
-    """
-    Custom collate function to pad input_ids, attention_mask, labels for causal LM training.
-    Args:
-        batch: List of dicts from the dataset
-        pad_token_id: Token ID to use for padding (default 0)
-    Returns:
-        Dict of padded tensors
-    """
-    # Ensure input_ids and labels have the same length for each example
-    processed_batch = []
-    for x in batch:
-        input_ids = x['input_ids']
-        labels = x['labels']
-        
-        # Ensure labels has the same length as input_ids
-        if len(labels) != len(input_ids):
-            if len(labels) > len(input_ids):
-                labels = labels[:len(input_ids)]
-            else:
-                labels = labels + [-100] * (len(input_ids) - len(labels))
-        
-        processed_batch.append({
-            'input_ids': input_ids,
-            'attention_mask': x['attention_mask'],
-            'labels': labels
-        })
-    
-    input_ids = [torch.tensor(x['input_ids'], dtype=torch.long) for x in processed_batch]
-    attention_mask = [torch.tensor(x['attention_mask'], dtype=torch.long) for x in processed_batch]
-    labels = [torch.tensor(x['labels'], dtype=torch.long) for x in processed_batch]
-
-    input_ids_padded = pad_sequence(input_ids, batch_first=True, padding_value=pad_token_id)
-    attention_mask_padded = pad_sequence(attention_mask, batch_first=True, padding_value=0)
-    labels_padded = pad_sequence(labels, batch_first=True, padding_value=-100)
-
+    # Dynamic padding to the longest sequence in the batch
+    batch_input_ids = [x['input_ids'] for x in batch]
+    batch_attention_mask = [x['attention_mask'] for x in batch]
+    batch_labels = [x['labels'] for x in batch]
+    max_length = max(len(ids) for ids in batch_input_ids)
+    padded_input_ids = []
+    padded_attention_mask = []
+    padded_labels = []
+    for input_ids, attention_mask, labels in zip(batch_input_ids, batch_attention_mask, batch_labels):
+        pad_len = max_length - len(input_ids)
+        padded_input_ids.append(input_ids + [pad_token_id] * pad_len)
+        padded_attention_mask.append(attention_mask + [0] * pad_len)
+        padded_labels.append(labels + [-100] * pad_len)
     return {
-        'input_ids': input_ids_padded,
-        'attention_mask': attention_mask_padded,
-        'labels': labels_padded
+        'input_ids': torch.tensor(padded_input_ids, dtype=torch.long),
+        'attention_mask': torch.tensor(padded_attention_mask, dtype=torch.long),
+        'labels': torch.tensor(padded_labels, dtype=torch.long)
     } 

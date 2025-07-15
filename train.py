@@ -141,11 +141,39 @@ class LoRATrainer:
         """
         self.model.train()
         
+        # Debug: Check batch content (only on first few steps)
+        if self.global_step < 5:
+            input_ids = batch['input_ids']
+            labels = batch['labels']
+            print(f"Step {self.global_step}:")
+            print(f"  Input shape: {input_ids.shape}")
+            print(f"  Labels shape: {labels.shape}")
+            print(f"  Labels range: {labels.min().item()} to {labels.max().item()}")
+            print(f"  Non-100 labels: {(labels != -100).sum().item()}")
+            print(f"  Sample input_ids: {input_ids[0, :10].tolist()}")
+            print(f"  Sample labels: {labels[0, :10].tolist()}")
+        
         # Calculate loss
         loss = self.calculate_loss(batch)
         
+        # Debug: Check loss
+        if self.global_step < 5:
+            print(f"  Loss: {loss.item():.4f}")
+        
         # Backward pass
         loss.backward()
+        
+        # Debug: Check gradients
+        if self.global_step < 5:
+            total_grad_norm = 0
+            for name, param in self.model.named_parameters():
+                if param.grad is not None:
+                    grad_norm = param.grad.norm().item()
+                    total_grad_norm += grad_norm ** 2
+                    if grad_norm > 0:
+                        print(f"  {name}: grad_norm = {grad_norm:.6f}")
+            total_grad_norm = total_grad_norm ** 0.5
+            print(f"  Total grad norm: {total_grad_norm:.6f}")
         
         # Gradient clipping
         torch.nn.utils.clip_grad_norm_(

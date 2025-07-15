@@ -186,6 +186,19 @@ def parse_arguments():
         help="Force reload models and datasets (ignore cache)"
     )
     
+    # Debug arguments
+    parser.add_argument(
+        "--debug_mode",
+        action="store_true",
+        help="Enable debug mode with sampling for fast iteration"
+    )
+    parser.add_argument(
+        "--sample_size",
+        type=int,
+        default=100,
+        help="Sample size for debug mode"
+    )
+    
     return parser.parse_args()
 
 
@@ -283,7 +296,9 @@ def main():
         else:
             train_dataset, val_dataset, test_dataset = load_and_preprocess_data(
                 config.data, 
-                tokenizer
+                tokenizer,
+                debug_mode=args.debug_mode,
+                sample_size=args.sample_size
             )
             # Save datasets to cache
             if args.use_cache:
