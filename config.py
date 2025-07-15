@@ -43,7 +43,7 @@ class LoRAConfig:
 class TrainingConfig:
     """Training configuration optimized for 2-hour epochs."""
     learning_rate: float = 5e-5  # Much higher for faster convergence
-    batch_size: int = 4  # Increased batch size
+    batch_size: int = 1  # Increased batch size
     gradient_accumulation_steps: int = 8  # Reduced for faster steps
     max_epochs: int = 3
     warmup_steps: int = 500  # Increased warmup for higher LR
