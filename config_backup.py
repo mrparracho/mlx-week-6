@@ -1,5 +1,5 @@
 """
-Configuration for Qwen2.5-0.5B LoRA Fine-tuning with Chinchilla Scaling Laws
+Configuration for QWEN 7B LoRA Fine-tuning with Chinchilla Scaling Laws
 """
 
 from dataclasses import dataclass, asdict
@@ -31,9 +31,8 @@ class LoRAConfig:
     
     def __post_init__(self):
         if self.target_modules is None:
-            # Qwen2.5 uses separate q_proj, k_proj, v_proj, o_proj for attention
-            # and gate_proj, up_proj, down_proj for MLP
-            self.target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+            # QWEN uses c_attn (combined q,k,v) and c_proj (output projection)
+            self.target_modules = ["c_attn", "c_proj"]
         if self.alpha is None:
             self.alpha = 2 * self.rank
 
@@ -83,10 +82,10 @@ class DataConfig:
 @dataclass
 class ModelConfig:
     """Model configuration."""
-    model_name: str = "Qwen/Qwen2.5-0.5B"
+    model_name: str = "Qwen/Qwen-7B"
     trust_remote_code: bool = True
     use_cache: bool = False
-    torch_dtype: str = "float32"
+    torch_dtype: str = "float16"
     device_map: str = "auto"
 
 

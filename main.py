@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Main training script for QWEN 7B LoRA fine-tuning with Chinchilla scaling laws
+Main training script for Qwen2.5 LoRA fine-tuning with Chinchilla scaling laws
 """
 
 import os
@@ -28,14 +28,14 @@ import torch
 def parse_arguments():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(
-        description="QWEN 7B LoRA Fine-tuning with Chinchilla Scaling Laws"
+        description="Qwen2.5 LoRA Fine-tuning with Chinchilla Scaling Laws"
     )
     
     # Model arguments
     parser.add_argument(
         "--model_name",
         type=str,
-        default="Qwen/Qwen-7B",
+        default="Qwen/Qwen2.5-0.5B",
         help="Base model name or path"
     )
     
@@ -205,7 +205,7 @@ def parse_arguments():
 def main():
     """Main training function."""
     print("="*80)
-    print("QWEN 7B LoRA FINE-TUNING WITH CHINCHILLA SCALING LAWS")
+    print("QWEN2.5-0.5B LoRA FINE-TUNING WITH CHINCHILLA SCALING LAWS")
     print("="*80)
     
     # Parse arguments

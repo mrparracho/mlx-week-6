@@ -1,5 +1,5 @@
 """
-LoRA model implementation for QWEN 7B fine-tuning
+LoRA model implementation for Qwen2.5 fine-tuning
 """
 
 import os
@@ -23,7 +23,7 @@ except ImportError:
 
 
 class LoRAModel:
-    """LoRA model wrapper for QWEN 7B fine-tuning."""
+    """LoRA model wrapper for Qwen2.5 fine-tuning."""
     
     def __init__(self, model_config: ModelConfig, lora_config: LoRAConfig):
         self.model_config = model_config
@@ -33,7 +33,7 @@ class LoRAModel:
         
     def load_base_model(self) -> AutoModelForCausalLM:
         """
-        Load the base QWEN 7B model.
+        Load the base Qwen2.5 model.
         
         Returns:
             Loaded base model

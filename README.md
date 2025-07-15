@@ -1,14 +1,14 @@
-# QWEN 7B LoRA Fine-tuning for Summarization
+# Qwen2.5-0.5B LoRA Fine-tuning for Summarization
 
-This project implements fine-tuning of the QWEN 7B base model using Low-Rank Adaptation (LoRA) for supervised fine-tuning (SFT) to create high-quality text summaries.
+This project implements fine-tuning of the Qwen2.5-0.5B base model using Low-Rank Adaptation (LoRA) for supervised fine-tuning (SFT) to create high-quality text summaries.
 
 ## Overview
 
-The project leverages the QWEN 7B base model and applies LoRA techniques to efficiently fine-tune the model for summarization tasks. LoRA reduces the computational requirements and memory footprint while maintaining model performance.
+The project leverages the Qwen2.5-0.5B base model and applies LoRA techniques to efficiently fine-tune the model for summarization tasks. LoRA reduces the computational requirements and memory footprint while maintaining model performance.
 
 ## Key Features
 
-- **Base Model**: QWEN 7B (Qwen-7B-base)
+- **Base Model**: Qwen2.5-0.5B (Qwen2.5-0.5B-base)
 - **Fine-tuning Method**: LoRA (Low-Rank Adaptation)
 - **Task**: Text Summarization
 - **Framework**: MLX (Apple's machine learning framework)
@@ -39,7 +39,7 @@ mlx-week-6/
 - PEFT (Parameter-Efficient Fine-Tuning)
 - Datasets (HuggingFace)
 - MLX (Apple's ML framework)
-- QWEN 7B model weights (automatically downloaded)
+- Qwen2.5-0.5B model weights (automatically downloaded)
 - CNN/DailyMail dataset (automatically downloaded)
 
 **Note**: BitsAndBytes quantization is automatically used on Linux/Windows systems for memory efficiency. On macOS, the model will run in full precision.
@@ -57,7 +57,7 @@ cd mlx-week-6
 pip install -r requirements.txt
 ```
 
-3. The QWEN 7B model and CNN/DailyMail dataset will be automatically downloaded on first run.
+3. The Qwen2.5-0.5B model and CNN/DailyMail dataset will be automatically downloaded on first run.
 
 ## Usage
 
@@ -65,7 +65,7 @@ pip install -r requirements.txt
 
 ```bash
 python main.py \
-  --model_name "Qwen/Qwen-7B" \
+  --model_name "Qwen/Qwen2.5-0.5B" \
   --dataset_name "cnn_dailymail" \
   --lora_rank 16 \
   --learning_rate 1e-4 \
@@ -88,7 +88,7 @@ python main.py \
 
 ```bash
 python main.py \
-  --model_name "Qwen/Qwen-7B" \
+  --model_name "Qwen/Qwen2.5-0.5B" \
   --lora_rank 32 \
   --lora_dropout 0.2 \
   --learning_rate 5e-5 \
@@ -125,7 +125,7 @@ python example_boundary_training.py
 The model is fine-tuned using LoRA parameters:
 - **LoRA Rank**: 16 (default, configurable)
 - **LoRA Alpha**: 32 (2 × rank, configurable)
-- **Target Modules**: `["q_proj", "k_proj", "v_proj", "o_proj"]` (attention layers)
+- **Target Modules**: `["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]` (attention and MLP layers)
 - **Dropout**: 0.1 (configurable)
 - **Task Type**: Causal Language Modeling
 
@@ -139,9 +139,9 @@ The training incorporates Chinchilla scaling laws for optimal compute efficiency
 ### Training Process
 
 1. **Data Preprocessing**: CNN/DailyMail articles are formatted with "Summarize: " prefix and "\nTarget:" for summaries
-2. **Tokenization**: Input and target texts are tokenized with QWEN tokenizer
+2. **Tokenization**: Input and target texts are tokenized with Qwen2.5 tokenizer
 3. **Boundary Detection**: Automatic detection of input/target boundaries for enhanced loss calculation
-4. **LoRA Application**: Low-rank adapters are applied to attention layers
+4. **LoRA Application**: Low-rank adapters are applied to attention and MLP layers
 5. **Training Loop**: Supervised fine-tuning with gradient accumulation and boundary-aware loss
 6. **Validation**: Regular evaluation on validation set
 7. **Checkpointing**: Automatic saving of best models
@@ -173,28 +173,28 @@ boundary_smooth_window: int = 4
 
 ## Model Architecture
 
-- **Base Model**: QWEN 7B with 7 billion parameters
+- **Base Model**: Qwen2.5-0.5B with 502 million parameters
 - **LoRA Configuration**: Low-rank adaptation for efficient fine-tuning
 - **Quantization**: 4-bit quantization for memory efficiency
-- **Target Layers**: Attention projection matrices (q_proj, k_proj, v_proj, o_proj)
+- **Target Layers**: Attention projection matrices (q_proj, k_proj, v_proj, o_proj) and MLP layers (gate_proj, up_proj, down_proj)
 - **Output**: Text summaries with improved quality and coherence
-- **Memory Usage**: ~8GB GPU memory (with quantization)
+- **Memory Usage**: ~2GB GPU memory (with quantization)
 
 ## Performance
 
 ### Expected Results
 
-- **Training Time**: ~2-4 hours on RTX 4090 (3 epochs)
-- **Memory Usage**: ~8GB GPU memory with 4-bit quantization (Linux/Windows), ~16GB with full precision (macOS)
-- **Model Size**: ~7B parameters base + ~50M LoRA parameters
-- **Inference Speed**: ~1-2 seconds per summary generation
+- **Training Time**: ~30-60 minutes on RTX 4090 (3 epochs)
+- **Memory Usage**: ~2GB GPU memory with 4-bit quantization (Linux/Windows), ~4GB with full precision (macOS)
+- **Model Size**: ~502M parameters base + ~8.8M LoRA parameters
+- **Inference Speed**: ~0.5-1 seconds per summary generation
 
 ### Evaluation Metrics
 
 - **Loss Reduction**: Significant improvement over base model
 - **Summary Quality**: Coherent and relevant summaries
 - **Generation Speed**: Fast inference with LoRA adapters
-- **Memory Efficiency**: 99%+ parameter reduction with LoRA
+- **Memory Efficiency**: 98%+ parameter reduction with LoRA
 
 ## Contributing
 
@@ -215,6 +215,6 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ## Acknowledgments
 
-- QWEN team for the base model
+- Qwen team for the Qwen2.5 base model
 - MLX team for the framework
 - LoRA paper authors for the efficient fine-tuning method 
