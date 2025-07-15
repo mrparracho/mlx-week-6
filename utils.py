@@ -98,7 +98,7 @@ def save_training_history(history: Dict[str, Any], output_dir: str):
     print(f"✓ Training history saved to {history_file}")
 
 
-def generate_summary(model, tokenizer: AutoTokenizer, text: str, 
+def generate_summary(model, tokenizer, text: str, 
                     max_length: int = 128, temperature: float = 0.7) -> str:
     """
     Generate a summary for the given text.
@@ -199,9 +199,24 @@ def evaluate_summaries(model, tokenizer: AutoTokenizer,
     for i, idx in enumerate(tqdm(indices, desc="Evaluating")):
         example = test_dataset[idx]
         
-        # Get original text and target summary
-        original_text = example.get('article', '')
-        target_summary = example.get('highlights', '')
+        # Check if this is a preprocessed dataset (tokenized) or raw dataset
+        if 'input_ids' in example:
+            # This is a preprocessed dataset - we need to decode the input
+            input_ids = example['input_ids']
+            # Decode the input tokens to get the original text
+            original_text = tokenizer.decode(input_ids, skip_special_tokens=True)
+            print(f"Debug - Original text: {original_text}")
+            target_summary = "[Target not available in preprocessed dataset]"
+        else:
+            # This is a raw dataset - use the original fields
+            original_text = example.get('article', '')
+            target_summary = example.get('highlights', '')
+        
+        # Debug: Print dataset structure for first example
+        if i == 0:
+            print(f"Debug - Dataset keys: {list(example.keys())}")
+            print(f"Debug - Original text length: {len(original_text)}")
+            print(f"Debug - Original text preview: {original_text[:100]}...")
         
         # Generate summary
         start_time = time.time()
