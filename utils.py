@@ -179,8 +179,8 @@ def evaluate_summaries(model, tokenizer: AutoTokenizer,
     generation_times = []
     summary_lengths = []
     
-    # Sample from test dataset
-    indices = np.random.choice(len(test_dataset), actual_samples, replace=False)
+    # Sample from test dataset - convert numpy integers to Python integers
+    indices = np.random.choice(len(test_dataset), actual_samples, replace=False).tolist()
     
     for i, idx in enumerate(tqdm(indices, desc="Evaluating")):
         example = test_dataset[idx]
