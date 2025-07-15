@@ -1,0 +1,20 @@
+[project]
+name = "mlx-week-6"
+version = "0.1.0"
+description = "QWEN 7B LoRA Fine-tuning with Chinchilla Scaling Laws for Summarization"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "datasets>=2.14.0",
+    "transformers>=4.35.0",
+    "numpy>=1.24.0",
+    "torch>=2.0.0",
+    "tqdm>=4.65.0",
+    "huggingface-hub>=0.17.0",
+    "accelerate>=0.24.0",
+    "peft>=0.6.0",
+    "tiktoken>=0.5.0",
+    "pip>=25.1.1",
+    "einops>=0.8.1",
+    "transformers-stream-generator>=0.0.5",
+]
