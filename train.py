@@ -4,6 +4,7 @@ Training module for QWEN 7B LoRA fine-tuning with Chinchilla scaling laws
 
 import os
 import time
+import random
 from typing import Dict, List, Optional, Tuple, Any
 import torch
 from torch.utils.data import DataLoader
@@ -287,8 +288,20 @@ class LoRATrainer:
         
         print("\nApplying Chinchilla scaling laws...")
         
-        # Calculate total tokens in training dataset
-        total_tokens = sum(len(example['input_ids']) for example in train_dataset if 'input_ids' in example)
+        # Calculate total tokens in training dataset - use efficient sampling for large datasets
+        dataset_size = len(train_dataset)
+        if dataset_size > 10000:
+            # For large datasets, sample to estimate total tokens
+            sample_size = min(1000, dataset_size // 100)  # Sample 1% or 1000 examples
+            sample_indices = random.sample(range(dataset_size), sample_size)
+            sample_dataset = train_dataset.select(sample_indices)
+            
+            sample_tokens = sum(len(example['input_ids']) for example in sample_dataset if 'input_ids' in example)
+            total_tokens = int(sample_tokens * (dataset_size / sample_size))
+            print(f"Estimated total tokens from {sample_size} sample examples")
+        else:
+            # For small datasets, count all tokens
+            total_tokens = sum(len(example['input_ids']) for example in train_dataset if 'input_ids' in example)
         
         # Check if base_model_size is available
         if self.chinchilla_config.base_model_size is None:
