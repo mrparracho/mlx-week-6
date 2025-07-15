@@ -144,6 +144,7 @@ class LoRATrainer:
         # Debug: Check batch content (only on first few steps)
         if self.global_step < 5:
             input_ids = batch['input_ids']
+            attention_mask = batch['attention_mask']
             labels = batch['labels']
             print(f"Step {self.global_step}:")
             print(f"  Input shape: {input_ids.shape}")
