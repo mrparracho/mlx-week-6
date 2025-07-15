@@ -43,10 +43,19 @@ class LoRAModel:
         # Prepare model loading arguments
         model_kwargs = {
             "trust_remote_code": self.model_config.trust_remote_code,
-            "device_map": self.model_config.device_map,
             "torch_dtype": getattr(torch, self.model_config.torch_dtype),
             "use_cache": self.model_config.use_cache
         }
+        
+        # Set device map based on availability
+        if torch.cuda.is_available():
+            model_kwargs["device_map"] = self.model_config.device_map
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            # Use MPS if available
+            model_kwargs["device_map"] = "mps"
+        else:
+            # Fall back to CPU
+            model_kwargs["device_map"] = "cpu"
         
         # Add quantization if bitsandbytes is available
         if BITSANDBYTES_AVAILABLE:

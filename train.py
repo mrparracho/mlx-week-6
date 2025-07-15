@@ -27,10 +27,24 @@ class LoRATrainer:
         self.tokenizer = tokenizer
         self.training_config = training_config
         self.chinchilla_config = chinchilla_config
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Use CUDA if available, then MPS, then CPU
+        if torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            self.device = torch.device("mps")
+        else:
+            self.device = torch.device("cpu")
         
         # Move model to device (use to_empty for meta tensors)
-        self.model.to_empty(device=self.device)
+        try:
+            self.model.to_empty(device=self.device)
+            print(f"✓ Model moved to device: {self.device}")
+        except Exception as e:
+            print(f"Warning: Failed to move model to {self.device}: {e}")
+            print("Falling back to CPU...")
+            self.device = torch.device("cpu")
+            self.model.to_empty(device=self.device)
+            print("✓ Model moved to CPU")
         
         # Training state
         self.global_step = 0
@@ -220,8 +234,12 @@ class LoRATrainer:
         print("\nApplying Chinchilla scaling laws...")
         
         # Calculate total tokens in training dataset
-        total_tokens = sum(len(example['input_ids']) + len(example['target_ids']) 
-                          for example in train_dataset)
+        total_tokens = sum(len(example['input_ids']) for example in train_dataset if 'input_ids' in example)
+        
+        # Check if base_model_size is available
+        if self.chinchilla_config.base_model_size is None:
+            print("Warning: base_model_size not set, skipping scaling analysis")
+            return {}
         
         # Analyze scaling efficiency
         analysis = analyze_scaling_efficiency(

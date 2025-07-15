@@ -88,50 +88,38 @@ class SummarizationDataLoader:
         Returns:
             Tokenized examples
         """
-        # For causal LM, we need to concatenate input and target
-        # Format: input + target (with proper separators)
         combined_texts = []
+        input_lengths = []
         for input_text, target_text in zip(examples['input'], examples['target']):
-            # Add separator between input and target
             combined_text = input_text + " " + target_text
             combined_texts.append(combined_text)
-        
-        # Tokenize combined texts
-        tokenized = self.tokenizer(
-            combined_texts,
-            max_length=self.config.max_input_length + self.config.max_target_length,
-            truncation=self.config.truncation,
-            padding=False  # No padding
-        )
-        
-        # Create labels for causal LM training
-        # Labels should be -100 for input tokens and actual token IDs for target tokens
-        labels = []
-        for i, (input_text, target_text) in enumerate(zip(examples['input'], examples['target'])):
-            # Tokenize input and target separately to find boundaries
+            # Tokenize input only to get its length
             input_tokens = self.tokenizer(
                 input_text,
                 add_special_tokens=False,
                 return_tensors=None
             )
-            target_tokens = self.tokenizer(
-                target_text,
-                add_special_tokens=False,
-                return_tensors=None
-            )
-            
-            input_length = len(input_tokens['input_ids'])
-            target_length = len(target_tokens['input_ids'])
-            
-            # Create labels: -100 for input, actual tokens for target
-            label = [-100] * input_length + target_tokens['input_ids']
-            
-            # Truncate if needed
-            if len(label) > self.config.max_input_length + self.config.max_target_length:
-                label = label[:self.config.max_input_length + self.config.max_target_length]
-            
+            input_lengths.append(len(input_tokens['input_ids']))
+
+        # Tokenize combined texts
+        tokenized = self.tokenizer(
+            combined_texts,
+            max_length=self.config.max_input_length + self.config.max_target_length,
+            truncation=self.config.truncation,
+            padding=False
+        )
+
+        labels = []
+        for input_len, input_ids in zip(input_lengths, tokenized['input_ids']):
+            # -100 for input tokens, actual ids for target tokens
+            label = [-100] * input_len + input_ids[input_len:]
+            # Truncate or pad to match input_ids length
+            if len(label) > len(input_ids):
+                label = label[:len(input_ids)]
+            elif len(label) < len(input_ids):
+                label += [-100] * (len(input_ids) - len(label))
             labels.append(label)
-        
+
         return {
             'input_ids': tokenized['input_ids'],
             'attention_mask': tokenized['attention_mask'],
@@ -178,27 +166,74 @@ class SummarizationDataLoader:
         Returns:
             Dictionary with statistics
         """
-        input_lengths = []
-        label_lengths = []
+        # For very large datasets, use sampling to estimate statistics
+        dataset_size = len(dataset)
         
-        for example in tqdm(dataset, desc="Calculating statistics"):
-            input_lengths.append(len(example['input_ids']))
-            # Count non-padding labels (where label != -100)
-            valid_labels = [l for l in example['labels'] if l != -100]
-            label_lengths.append(len(valid_labels))
-        
-        stats = {
-            'num_examples': len(dataset),
-            'avg_input_length': np.mean(input_lengths),
-            'avg_target_length': np.mean(label_lengths),
-            'max_input_length': np.max(input_lengths),
-            'max_target_length': np.max(label_lengths),
-            'min_input_length': np.min(input_lengths),
-            'min_target_length': np.min(label_lengths),
-            'total_input_tokens': sum(input_lengths),
-            'total_target_tokens': sum(label_lengths),
-            'total_tokens': sum(input_lengths) + sum(label_lengths)
-        }
+        if dataset_size > 10000:
+            # Use sampling for very large datasets
+            import random
+            sample_size = min(5000, dataset_size // 10)  # Sample 10% or 5000, whichever is smaller
+            sample_indices = random.sample(range(dataset_size), sample_size)
+            sample_dataset = dataset.select(sample_indices)
+            
+            input_lengths = []
+            label_lengths = []
+            
+            for example in tqdm(sample_dataset, desc="Calculating statistics (sampled)"):
+                input_lengths.append(len(example['input_ids']))
+                # Count non-padding labels efficiently
+                labels = example['labels']
+                valid_count = sum(1 for l in labels if l != -100)
+                label_lengths.append(valid_count)
+            
+            # Extrapolate to full dataset
+            avg_input_length = np.mean(input_lengths)
+            avg_target_length = np.mean(label_lengths)
+            total_input_tokens = int(avg_input_length * dataset_size)
+            total_target_tokens = int(avg_target_length * dataset_size)
+            
+            stats = {
+                'num_examples': dataset_size,
+                'avg_input_length': avg_input_length,
+                'avg_target_length': avg_target_length,
+                'max_input_length': np.max(input_lengths),
+                'max_target_length': np.max(label_lengths),
+                'min_input_length': np.min(input_lengths),
+                'min_target_length': np.min(label_lengths),
+                'total_input_tokens': total_input_tokens,
+                'total_target_tokens': total_target_tokens,
+                'total_tokens': total_input_tokens + total_target_tokens
+            }
+            
+        else:
+            # For smaller datasets, process all examples but in batches
+            batch_size = 1000
+            input_lengths = []
+            label_lengths = []
+            
+            for i in tqdm(range(0, dataset_size, batch_size), desc="Calculating statistics"):
+                end_idx = min(i + batch_size, dataset_size)
+                batch = dataset.select(range(i, end_idx))
+                
+                for example in batch:
+                    input_lengths.append(len(example['input_ids']))
+                    # Count non-padding labels efficiently
+                    labels = example['labels']
+                    valid_count = sum(1 for l in labels if l != -100)
+                    label_lengths.append(valid_count)
+            
+            stats = {
+                'num_examples': len(dataset),
+                'avg_input_length': np.mean(input_lengths),
+                'avg_target_length': np.mean(label_lengths),
+                'max_input_length': np.max(input_lengths),
+                'max_target_length': np.max(label_lengths),
+                'min_input_length': np.min(input_lengths),
+                'min_target_length': np.min(label_lengths),
+                'total_input_tokens': sum(input_lengths),
+                'total_target_tokens': sum(label_lengths),
+                'total_tokens': sum(input_lengths) + sum(label_lengths)
+            }
         
         return stats
     
@@ -296,9 +331,28 @@ def collate_fn(batch, pad_token_id=0):
     Returns:
         Dict of padded tensors
     """
-    input_ids = [torch.tensor(x['input_ids'], dtype=torch.long) for x in batch]
-    attention_mask = [torch.tensor(x['attention_mask'], dtype=torch.long) for x in batch]
-    labels = [torch.tensor(x['labels'], dtype=torch.long) for x in batch]
+    # Ensure input_ids and labels have the same length for each example
+    processed_batch = []
+    for x in batch:
+        input_ids = x['input_ids']
+        labels = x['labels']
+        
+        # Ensure labels has the same length as input_ids
+        if len(labels) != len(input_ids):
+            if len(labels) > len(input_ids):
+                labels = labels[:len(input_ids)]
+            else:
+                labels = labels + [-100] * (len(input_ids) - len(labels))
+        
+        processed_batch.append({
+            'input_ids': input_ids,
+            'attention_mask': x['attention_mask'],
+            'labels': labels
+        })
+    
+    input_ids = [torch.tensor(x['input_ids'], dtype=torch.long) for x in processed_batch]
+    attention_mask = [torch.tensor(x['attention_mask'], dtype=torch.long) for x in processed_batch]
+    labels = [torch.tensor(x['labels'], dtype=torch.long) for x in processed_batch]
 
     input_ids_padded = pad_sequence(input_ids, batch_first=True, padding_value=pad_token_id)
     attention_mask_padded = pad_sequence(attention_mask, batch_first=True, padding_value=0)
