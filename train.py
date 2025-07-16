@@ -69,32 +69,92 @@ class LoRATrainer:
             checkpoint_path: Path to checkpoint directory or 'best' for best model
         """
         import json
+        import glob
+        import os
         
         print(f"🔄 Resuming training from checkpoint: {checkpoint_path}")
         
         # Handle 'best' checkpoint
         if checkpoint_path == 'best':
-            # Find the best model checkpoint
-            output_dir = os.path.dirname(checkpoint_path) if os.path.dirname(checkpoint_path) else '.'
-            best_info_path = os.path.join(output_dir, 'best_model_info.json')
-            
-            if os.path.exists(best_info_path):
-                with open(best_info_path, 'r') as f:
-                    best_info = json.load(f)
-                    checkpoint_path = os.path.join(output_dir, best_info['checkpoint'])
-                    print(f"Found best checkpoint: {checkpoint_path}")
-            else:
+            # Try to find best_model_info.json in common locations
+            possible_dirs = [
+                './trained_model',
+                './output',
+                '.',
+            ]
+            best_info_path = None
+            output_dir = None
+            for dir_path in possible_dirs:
+                test_path = os.path.join(dir_path, 'best_model_info.json')
+                if os.path.exists(test_path):
+                    best_info_path = test_path
+                    output_dir = dir_path
+                    break
+            if best_info_path is None:
+                # Try to find any best_model_info.json in the workspace
+                matches = glob.glob('**/best_model_info.json', recursive=True)
+                if matches:
+                    best_info_path = matches[0]
+                    output_dir = os.path.dirname(best_info_path)
+            if best_info_path is None:
                 raise ValueError("No best model info found. Cannot resume from 'best' checkpoint.")
+            assert output_dir is not None, "Output directory for best checkpoint could not be determined."
+            with open(best_info_path, 'r') as f:
+                best_info = json.load(f)
+                checkpoint_path = os.path.join(output_dir, best_info['checkpoint'])
+                print(f"Found best checkpoint: {checkpoint_path}")
         
         # Load model and tokenizer
         try:
             print(f"Loading model from {checkpoint_path}")
-            self.model = self.model.__class__.from_pretrained(checkpoint_path)
+            # Try to detect if this is a PEFT/LoRA checkpoint
+            import os
+            from transformers import AutoModelForCausalLM
+            model_loaded = False
+            try:
+                from peft import PeftModel, PeftConfig
+                peft_config_path = os.path.join(checkpoint_path, 'adapter_config.json')
+                if os.path.exists(peft_config_path):
+                    print("Detected PEFT/LoRA checkpoint. Loading base model and applying LoRA adapter...")
+                    peft_config = PeftConfig.from_pretrained(checkpoint_path)
+                    if not peft_config.base_model_name_or_path:
+                        raise ValueError("PEFT config is missing base_model_name_or_path. Cannot load base model.")
+                    base_model = AutoModelForCausalLM.from_pretrained(str(peft_config.base_model_name_or_path))
+                    # PeftModel.from_pretrained(base_model, model_id) is the correct signature
+                    self.model = PeftModel.from_pretrained(base_model, checkpoint_path)
+                    model_loaded = True
+            except ImportError:
+                print("peft not installed, skipping PEFT/LoRA loading.")
+            if not model_loaded:
+                # Fallback to standard HuggingFace model loading
+                self.model = self.model.__class__.from_pretrained(checkpoint_path)
             self.tokenizer = self.tokenizer.__class__.from_pretrained(checkpoint_path)
             
             # Move model to device
             self.model.to_empty(device=self.device)
             print(f"✓ Model loaded and moved to {self.device}")
+            
+            # Ensure model is in training mode and parameters are trainable
+            self.model.train()
+            
+            # For PEFT/LoRA models, ensure adapter parameters are trainable
+            trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+            if len(trainable_params) == 0:
+                print("⚠️  No trainable parameters found. Attempting to fix...")
+                # Try to enable training for LoRA parameters
+                for name, param in self.model.named_parameters():
+                    if any(keyword in name.lower() for keyword in ['lora', 'adapter', 'peft']):
+                        param.requires_grad = True
+                        print(f"  Enabled training for: {name}")
+                
+                # Check again
+                trainable_params = [p for p in self.model.parameters() if p.requires_grad]
+                if len(trainable_params) == 0:
+                    raise ValueError("No trainable parameters found after loading checkpoint. Model may not be properly configured for training.")
+                else:
+                    print(f"✓ Found {len(trainable_params)} trainable parameters")
+            else:
+                print(f"✓ Found {len(trainable_params)} trainable parameters")
             
         except Exception as e:
             print(f"Error loading model: {e}")
