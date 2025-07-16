@@ -19,18 +19,173 @@ from scaling_laws import analyze_scaling_efficiency, print_scaling_analysis
 from data import collate_fn
 
 
+class HuggingFaceHubSaver:
+    """Class to handle saving models to Hugging Face Hub."""
+    
+    def __init__(self, repo_name: Optional[str] = None, token: Optional[str] = None):
+        """
+        Initialize the HuggingFace Hub saver.
+        
+        Args:
+            repo_name: Repository name on Hugging Face Hub (e.g., "username/model-name")
+            token: Hugging Face token (if None, will try to get from HF_TOKEN env var)
+        """
+        self.repo_name = repo_name
+        self.token = token or os.getenv('HF_TOKEN')
+        self.enabled = bool(self.token and self.repo_name)
+        
+        if self.enabled:
+            print(f"✓ HuggingFace Hub saving enabled for: {self.repo_name}")
+        else:
+            if not self.token:
+                print("⚠️  No HuggingFace token found. Set HF_TOKEN environment variable to enable Hub saving.")
+            if not self.repo_name:
+                print("⚠️  No repository name provided. Set repo_name to enable Hub saving.")
+    
+    def save_to_hub(self, model, tokenizer, training_config: TrainingConfig, 
+                   best_loss: float, global_step: int, epoch: int) -> bool:
+        """
+        Save the model to Hugging Face Hub.
+        
+        Args:
+            model: The trained model
+            tokenizer: The tokenizer
+            training_config: Training configuration
+            best_loss: Best validation loss achieved
+            global_step: Current global step
+            epoch: Current epoch
+            
+        Returns:
+            True if saved successfully, False otherwise
+        """
+        if not self.enabled:
+            return False
+        
+        try:
+            print(f"\n🚀 Saving model to Hugging Face Hub: {self.repo_name}")
+            
+            # Create commit message with training info
+            commit_message = f"LoRA fine-tuned model - Loss: {best_loss:.4f}, Step: {global_step}, Epoch: {epoch}"
+            
+            # Save model
+            model.push_to_hub(
+                self.repo_name,
+                token=self.token,
+                commit_message=commit_message,
+                private=False  # Set to True if you want a private repository
+            )
+            
+            # Save tokenizer
+            tokenizer.push_to_hub(
+                self.repo_name,
+                token=self.token,
+                commit_message=f"Tokenizer for {commit_message}"
+            )
+            
+            # Create and save model card
+            self._create_model_card(training_config, best_loss, global_step, epoch)
+            
+            print(f"✓ Model successfully saved to: https://huggingface.co/{self.repo_name}")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Failed to save model to Hugging Face Hub: {e}")
+            return False
+    
+    def _create_model_card(self, training_config: TrainingConfig, best_loss: float, 
+                          global_step: int, epoch: int):
+        """Create a model card with training information."""
+        try:
+            model_card_content = f"""---
+language:
+- en
+license: mit
+tags:
+- text-generation
+- summarization
+- lora
+- qwen
+---
+
+# LoRA Fine-tuned Qwen2.5 Model for Summarization
+
+This model is a LoRA fine-tuned version of Qwen2.5-0.5B for text summarization tasks.
+
+## Training Information
+
+- **Base Model**: Qwen/Qwen2.5-0.5B
+- **Fine-tuning Method**: LoRA (Low-Rank Adaptation)
+- **Best Validation Loss**: {best_loss:.4f}
+- **Training Steps**: {global_step}
+- **Epochs**: {epoch}
+- **Learning Rate**: {training_config.learning_rate}
+- **Batch Size**: {training_config.batch_size}
+- **LoRA Rank**: 16
+- **LoRA Alpha**: 32
+
+## Usage
+
+```python
+from transformers import AutoTokenizer, AutoModelForCausalLM
+from peft import PeftModel
+
+# Load the model
+model = AutoModelForCausalLM.from_pretrained("Qwen/Qwen2.5-0.5B")
+model = PeftModel.from_pretrained(model, "{self.repo_name}")
+
+# Load tokenizer
+tokenizer = AutoTokenizer.from_pretrained("{self.repo_name}")
+
+# Generate summary
+input_text = "Your input text here..."
+inputs = tokenizer(f"Summarize: {{input_text}}\\nTarget:", return_tensors="pt")
+outputs = model.generate(**inputs, max_length=128)
+summary = tokenizer.decode(outputs[0], skip_special_tokens=True)
+```
+
+## Training Details
+
+This model was fine-tuned using LoRA with the following configuration:
+- Target modules: q_proj, k_proj, v_proj, o_proj, gate_proj, up_proj, down_proj
+- LoRA dropout: 0.1
+- Weight decay: {training_config.weight_decay}
+- Warmup steps: {training_config.warmup_steps}
+
+The model was trained on the CNN/DailyMail dataset for text summarization.
+"""
+            
+            # Save model card
+            from huggingface_hub import HfApi
+            api = HfApi(token=self.token)
+            if self.repo_name:  # Ensure repo_name is not None
+                api.upload_file(
+                    path_or_fileobj=model_card_content.encode(),
+                    path_in_repo="README.md",
+                    repo_id=self.repo_name,
+                    commit_message="Add model card"
+                )
+            
+        except Exception as e:
+            print(f"Warning: Could not create model card: {e}")
+
+
 class LoRATrainer:
     """Trainer for LoRA fine-tuning with Chinchilla scaling laws."""
     
     def __init__(self, model, tokenizer: AutoTokenizer, 
                  training_config: TrainingConfig, 
                  chinchilla_config: ChinchillaConfig,
-                 resume_from_checkpoint: Optional[str] = None):
+                 resume_from_checkpoint: Optional[str] = None,
+                 hf_repo_name: Optional[str] = None):
         self.model = model
         self.tokenizer = tokenizer
         self.training_config = training_config
         self.chinchilla_config = chinchilla_config
         self.resume_from_checkpoint = resume_from_checkpoint
+        
+        # Initialize HuggingFace Hub saver
+        self.hf_saver = HuggingFaceHubSaver(repo_name=hf_repo_name)
+        
         # Use CUDA if available, then MPS, then CPU
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
@@ -551,6 +706,22 @@ class LoRATrainer:
                 json.dump(best_info, f, indent=2)
             
             print(f"✓ Best model info saved to {best_info_path}")
+            
+            # Save to HuggingFace Hub if enabled
+            if self.hf_saver.enabled:
+                print("🔄 Saving new best model to HuggingFace Hub...")
+                success = self.hf_saver.save_to_hub(
+                    self.model, 
+                    self.tokenizer, 
+                    self.training_config,
+                    current_loss,
+                    self.global_step,
+                    self.epoch
+                )
+                if success:
+                    print("✓ Best model saved to HuggingFace Hub")
+                else:
+                    print("⚠️  Failed to save to HuggingFace Hub")
         else:
             print(f"📊 Current loss {current_loss:.4f} not better than best {previous_best_loss:.4f}")
 
@@ -799,7 +970,8 @@ class LoRATrainer:
 def create_trainer(model, tokenizer: AutoTokenizer, 
                   training_config: TrainingConfig,
                   chinchilla_config: ChinchillaConfig,
-                  resume_from_checkpoint: Optional[str] = None) -> LoRATrainer:
+                  resume_from_checkpoint: Optional[str] = None,
+                  hf_repo_name: Optional[str] = None) -> LoRATrainer:
     """
     Create a trainer instance with resume support.
     
@@ -809,11 +981,12 @@ def create_trainer(model, tokenizer: AutoTokenizer,
         training_config: Training configuration
         chinchilla_config: Chinchilla configuration
         resume_from_checkpoint: Path to checkpoint to resume from
+        hf_repo_name: HuggingFace Hub repository name for saving models
         
     Returns:
         LoRATrainer instance
     """
-    return LoRATrainer(model, tokenizer, training_config, chinchilla_config, resume_from_checkpoint)
+    return LoRATrainer(model, tokenizer, training_config, chinchilla_config, resume_from_checkpoint, hf_repo_name)
 
 
 def train_model(model, tokenizer: AutoTokenizer, 
@@ -821,7 +994,8 @@ def train_model(model, tokenizer: AutoTokenizer,
                 training_config: TrainingConfig,
                 chinchilla_config: ChinchillaConfig,
                 output_dir: str,
-                resume_from_checkpoint: Optional[str] = None) -> Dict[str, Any]:
+                resume_from_checkpoint: Optional[str] = None,
+                hf_repo_name: Optional[str] = None) -> Dict[str, Any]:
     """
     Train the model with resume support.
     
@@ -834,12 +1008,13 @@ def train_model(model, tokenizer: AutoTokenizer,
         chinchilla_config: Chinchilla configuration
         output_dir: Output directory
         resume_from_checkpoint: Path to checkpoint to resume from
+        hf_repo_name: HuggingFace Hub repository name for saving models
         
     Returns:
         Training history
     """
     # Create trainer
-    trainer = create_trainer(model, tokenizer, training_config, chinchilla_config, resume_from_checkpoint)
+    trainer = create_trainer(model, tokenizer, training_config, chinchilla_config, resume_from_checkpoint, hf_repo_name)
     
     # Start training
     history = trainer.train(train_dataset, val_dataset, output_dir)

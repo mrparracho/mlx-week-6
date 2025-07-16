@@ -221,6 +221,14 @@ def parse_arguments():
         help="Path to checkpoint directory to resume from, or 'best' for best model"
     )
     
+    # HuggingFace Hub arguments
+    parser.add_argument(
+        "--hf_repo_name",
+        type=str,
+        default=None,
+        help="HuggingFace Hub repository name (e.g., 'username/model-name') for saving models"
+    )
+    
     return parser.parse_args()
 
 
@@ -402,7 +410,8 @@ def main():
                 training_config=config.training,
                 chinchilla_config=config.chinchilla,
                 output_dir=config.output.output_dir,
-                resume_from_checkpoint=args.resume_from_checkpoint
+                resume_from_checkpoint=args.resume_from_checkpoint,
+                hf_repo_name=args.hf_repo_name
             )
             
             # Save training history
