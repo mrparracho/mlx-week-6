@@ -213,6 +213,14 @@ def parse_arguments():
         help="Sample size for debug mode"
     )
     
+    # Resume arguments
+    parser.add_argument(
+        "--resume_from_checkpoint",
+        type=str,
+        default=None,
+        help="Path to checkpoint directory to resume from, or 'best' for best model"
+    )
+    
     return parser.parse_args()
 
 
@@ -393,7 +401,8 @@ def main():
                 val_dataset=val_dataset,
                 training_config=config.training,
                 chinchilla_config=config.chinchilla,
-                output_dir=config.output.output_dir
+                output_dir=config.output.output_dir,
+                resume_from_checkpoint=args.resume_from_checkpoint
             )
             
             # Save training history

@@ -106,6 +106,39 @@ Run the example script for guided usage:
 python example_usage.py
 ```
 
+### Resume Training
+
+The training system supports seamless resumption from checkpoints:
+
+```bash
+# Resume from a specific checkpoint
+python main.py --resume_from_checkpoint ./trained_model/checkpoint-1000
+
+# Resume from the best model
+python main.py --resume_from_checkpoint best
+
+# Resume with different training parameters
+python main.py --resume_from_checkpoint best --learning_rate 5e-5 --epochs 10
+```
+
+**Resume Features:**
+- **Automatic State Restoration**: Loads model, optimizer, scheduler, and training history
+- **Flexible Checkpoint Selection**: Resume from any checkpoint or the best model
+- **Mid-Epoch Resumption**: Can resume from any point, even mid-epoch
+- **Parameter Modification**: Change training parameters when resuming
+- **Progress Tracking**: Maintains all training history and continues seamlessly
+
+**Available Checkpoints:**
+- `checkpoint-XXXX`: Regular checkpoints saved every N steps
+- `best`: Symlink to the best performing model
+- `best_model_info.json`: Metadata about the best model
+
+Run the resume example script for detailed usage:
+
+```bash
+python example_resume_training.py
+```
+
 ### Testing Boundary Detection
 
 Test the boundary detection functionality:

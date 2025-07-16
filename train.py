@@ -6,7 +6,7 @@ import os
 import time
 import random
 import math
-from typing import Dict, List, Optional, Tuple, Any
+from typing import Dict, List, Optional, Tuple, Any, Union
 import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
@@ -24,11 +24,13 @@ class LoRATrainer:
     
     def __init__(self, model, tokenizer: AutoTokenizer, 
                  training_config: TrainingConfig, 
-                 chinchilla_config: ChinchillaConfig):
+                 chinchilla_config: ChinchillaConfig,
+                 resume_from_checkpoint: Optional[str] = None):
         self.model = model
         self.tokenizer = tokenizer
         self.training_config = training_config
         self.chinchilla_config = chinchilla_config
+        self.resume_from_checkpoint = resume_from_checkpoint
         # Use CUDA if available, then MPS, then CPU
         if torch.cuda.is_available():
             self.device = torch.device("cuda")
@@ -55,9 +57,82 @@ class LoRATrainer:
         self.training_losses = []
         self.validation_losses = []
         
+        # Resume from checkpoint if specified
+        if resume_from_checkpoint:
+            self._resume_from_checkpoint(resume_from_checkpoint)
+    
+    def _resume_from_checkpoint(self, checkpoint_path: str):
+        """
+        Resume training from a checkpoint.
+        
+        Args:
+            checkpoint_path: Path to checkpoint directory or 'best' for best model
+        """
+        import json
+        
+        print(f"🔄 Resuming training from checkpoint: {checkpoint_path}")
+        
+        # Handle 'best' checkpoint
+        if checkpoint_path == 'best':
+            # Find the best model checkpoint
+            output_dir = os.path.dirname(checkpoint_path) if os.path.dirname(checkpoint_path) else '.'
+            best_info_path = os.path.join(output_dir, 'best_model_info.json')
+            
+            if os.path.exists(best_info_path):
+                with open(best_info_path, 'r') as f:
+                    best_info = json.load(f)
+                    checkpoint_path = os.path.join(output_dir, best_info['checkpoint'])
+                    print(f"Found best checkpoint: {checkpoint_path}")
+            else:
+                raise ValueError("No best model info found. Cannot resume from 'best' checkpoint.")
+        
+        # Load model and tokenizer
+        try:
+            print(f"Loading model from {checkpoint_path}")
+            self.model = self.model.__class__.from_pretrained(checkpoint_path)
+            self.tokenizer = self.tokenizer.__class__.from_pretrained(checkpoint_path)
+            
+            # Move model to device
+            self.model.to_empty(device=self.device)
+            print(f"✓ Model loaded and moved to {self.device}")
+            
+        except Exception as e:
+            print(f"Error loading model: {e}")
+            raise
+        
+        # Load training state
+        training_state_path = os.path.join(checkpoint_path, 'training_state.pt')
+        if os.path.exists(training_state_path):
+            try:
+                print(f"Loading training state from {training_state_path}")
+                training_state = torch.load(training_state_path, map_location=self.device)
+                
+                # Restore training state
+                self.global_step = training_state.get('global_step', 0)
+                self.epoch = training_state.get('epoch', 0)
+                self.best_loss = training_state.get('best_loss', float('inf'))
+                self.training_losses = training_state.get('training_losses', [])
+                self.validation_losses = training_state.get('validation_losses', [])
+                
+                print(f"✓ Training state restored:")
+                print(f"  Global step: {self.global_step}")
+                print(f"  Epoch: {self.epoch}")
+                print(f"  Best loss: {self.best_loss:.4f}")
+                print(f"  Training losses: {len(self.training_losses)}")
+                print(f"  Validation losses: {len(self.validation_losses)}")
+                
+                # Note: Optimizer and scheduler will be recreated in setup_optimizer_and_scheduler
+                # with the correct state loaded
+                
+            except Exception as e:
+                print(f"Warning: Could not load training state: {e}")
+                print("Starting from beginning...")
+        else:
+            print("No training state found. Starting from beginning...")
+        
     def setup_optimizer_and_scheduler(self, num_training_steps: int):
         """
-        Set up optimizer and learning rate scheduler.
+        Set up optimizer and learning rate scheduler with resume support.
         
         Args:
             num_training_steps: Total number of training steps
@@ -81,11 +156,33 @@ class LoRATrainer:
             num_training_steps=num_training_steps
         )
         
+        # Load optimizer and scheduler state if resuming
+        if self.resume_from_checkpoint:
+            training_state_path = os.path.join(self.resume_from_checkpoint, 'training_state.pt')
+            if os.path.exists(training_state_path):
+                try:
+                    training_state = torch.load(training_state_path, map_location=self.device)
+                    
+                    # Load optimizer state
+                    if 'optimizer_state_dict' in training_state:
+                        self.optimizer.load_state_dict(training_state['optimizer_state_dict'])
+                        print("✓ Optimizer state restored")
+                    
+                    # Load scheduler state
+                    if 'scheduler_state_dict' in training_state and self.scheduler:
+                        self.scheduler.load_state_dict(training_state['scheduler_state_dict'])
+                        print("✓ Scheduler state restored")
+                        
+                except Exception as e:
+                    print(f"Warning: Could not restore optimizer/scheduler state: {e}")
+        
         print(f"✓ Optimizer and scheduler created")
         print(f"  Learning rate: {self.training_config.learning_rate}")
         print(f"  Weight decay: {self.training_config.weight_decay}")
         print(f"  Warmup steps: {self.training_config.warmup_steps}")
         print(f"  Total steps: {num_training_steps}")
+        if self.resume_from_checkpoint:
+            print(f"  Resuming from step: {self.global_step}")
     
     def create_dataloader(self, dataset: Dataset, shuffle: bool = True) -> DataLoader:
         """
@@ -277,7 +374,7 @@ class LoRATrainer:
                 except Exception as e:
                     print(f"Warning: Could not remove old checkpoint {old_checkpoint}: {e}")
     
-    def save_checkpoint(self, output_dir: str, is_best: bool = False, current_loss: float = None):
+    def save_checkpoint(self, output_dir: str, is_best: bool = False, current_loss: Optional[float] = None):
         """
         Save a checkpoint with smart best model management.
         
@@ -478,12 +575,22 @@ class LoRATrainer:
             sample_indices = random.sample(range(dataset_size), sample_size)
             sample_dataset = train_dataset.select(sample_indices)
             
-            sample_tokens = sum(len(example['input_ids']) for example in sample_dataset if 'input_ids' in example)
+            # Fix the dataset access issue
+            sample_tokens = 0
+            for i in range(len(sample_dataset)):
+                example = sample_dataset[i]
+                if 'input_ids' in example:
+                    sample_tokens += len(example['input_ids'])
+            
             total_tokens = int(sample_tokens * (dataset_size / sample_size))
             print(f"Estimated total tokens from {sample_size} sample examples")
         else:
             # For small datasets, count all tokens
-            total_tokens = sum(len(example['input_ids']) for example in train_dataset if 'input_ids' in example)
+            total_tokens = 0
+            for i in range(len(train_dataset)):
+                example = train_dataset[i]
+                if 'input_ids' in example:
+                    total_tokens += len(example['input_ids'])
         
         # Check if base_model_size is available
         if self.chinchilla_config.base_model_size is None:
@@ -502,9 +609,9 @@ class LoRATrainer:
         return analysis
     
     def train(self, train_dataset: Dataset, val_dataset: Dataset, 
-              output_dir: str) -> Dict[str, List[float]]:
+              output_dir: str) -> Dict[str, Union[List[float], Dict]]:
         """
-        Main training loop.
+        Main training loop with resume support.
         
         Args:
             train_dataset: Training dataset
@@ -515,7 +622,10 @@ class LoRATrainer:
             Dictionary with training history
         """
         print("\n" + "="*60)
-        print("STARTING TRAINING")
+        if self.resume_from_checkpoint:
+            print("RESUMING TRAINING")
+        else:
+            print("STARTING TRAINING")
         print("="*60)
         
         # Apply Chinchilla scaling analysis
@@ -540,13 +650,33 @@ class LoRATrainer:
         # Training loop
         start_time = time.time()
         
-        for epoch in range(self.training_config.max_epochs):
+        # Calculate starting epoch and step for resume
+        if self.resume_from_checkpoint:
+            # Calculate how many epochs we've completed
+            steps_per_epoch = len(train_dataloader)
+            completed_epochs = self.global_step // steps_per_epoch
+            starting_epoch = completed_epochs
+            print(f"Resuming from epoch {starting_epoch + 1}, step {self.global_step}")
+        else:
+            starting_epoch = 0
+        
+        for epoch in range(starting_epoch, self.training_config.max_epochs):
             self.epoch = epoch
             print(f"\nEpoch {epoch + 1}/{self.training_config.max_epochs}")
             
             # Training
             epoch_losses = []
             progress_bar = tqdm(train_dataloader, desc=f"Training Epoch {epoch + 1}")
+            
+            # Skip batches if resuming mid-epoch
+            if self.resume_from_checkpoint and epoch == starting_epoch:
+                steps_in_current_epoch = self.global_step % len(train_dataloader)
+                for _ in range(steps_in_current_epoch):
+                    try:
+                        next(iter(progress_bar))
+                    except StopIteration:
+                        break
+                print(f"Skipped {steps_in_current_epoch} steps in current epoch")
             
             for batch in progress_bar:
                 loss = self.train_step(batch)
@@ -557,10 +687,9 @@ class LoRATrainer:
                 # Update progress bar
                 progress_bar.set_postfix({
                     'loss': f'{loss:.4f}',
-                    'lr': f'{self.scheduler.get_last_lr()[0]:.2e}'
+                    'lr': f'{self.scheduler.get_last_lr()[0]:.2e}',
+                    'step': self.global_step
                 })
-                
-
                 
                 # Validation
                 if self.global_step % self.training_config.eval_steps == 0:
@@ -609,29 +738,32 @@ class LoRATrainer:
 
 def create_trainer(model, tokenizer: AutoTokenizer, 
                   training_config: TrainingConfig,
-                  chinchilla_config: ChinchillaConfig) -> LoRATrainer:
+                  chinchilla_config: ChinchillaConfig,
+                  resume_from_checkpoint: Optional[str] = None) -> LoRATrainer:
     """
-    Create a trainer instance.
+    Create a trainer instance with resume support.
     
     Args:
         model: Model to train
         tokenizer: Tokenizer
         training_config: Training configuration
         chinchilla_config: Chinchilla configuration
+        resume_from_checkpoint: Path to checkpoint to resume from
         
     Returns:
         LoRATrainer instance
     """
-    return LoRATrainer(model, tokenizer, training_config, chinchilla_config)
+    return LoRATrainer(model, tokenizer, training_config, chinchilla_config, resume_from_checkpoint)
 
 
 def train_model(model, tokenizer: AutoTokenizer, 
                 train_dataset: Dataset, val_dataset: Dataset,
                 training_config: TrainingConfig,
                 chinchilla_config: ChinchillaConfig,
-                output_dir: str) -> Dict[str, Any]:
+                output_dir: str,
+                resume_from_checkpoint: Optional[str] = None) -> Dict[str, Any]:
     """
-    Train the model.
+    Train the model with resume support.
     
     Args:
         model: Model to train
@@ -641,12 +773,13 @@ def train_model(model, tokenizer: AutoTokenizer,
         training_config: Training configuration
         chinchilla_config: Chinchilla configuration
         output_dir: Output directory
+        resume_from_checkpoint: Path to checkpoint to resume from
         
     Returns:
         Training history
     """
     # Create trainer
-    trainer = create_trainer(model, tokenizer, training_config, chinchilla_config)
+    trainer = create_trainer(model, tokenizer, training_config, chinchilla_config, resume_from_checkpoint)
     
     # Start training
     history = trainer.train(train_dataset, val_dataset, output_dir)
