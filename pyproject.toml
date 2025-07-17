@@ -17,4 +17,5 @@ dependencies = [
     "pip>=25.1.1",
     "einops>=0.8.1",
     "transformers-stream-generator>=0.0.5",
+    "psutil>=7.0.0",
 ]

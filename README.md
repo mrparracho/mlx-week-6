@@ -158,7 +158,7 @@ python example_boundary_training.py
 The model is fine-tuned using LoRA parameters:
 - **LoRA Rank**: 16 (default, configurable)
 - **LoRA Alpha**: 32 (2 × rank, configurable)
-- **Target Modules**: `["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]` (attention and MLP layers)
+- **Target Modules**: `["q_proj", "k_proj", "v_proj", "o_proj"]` (attention and MLP layers)
 - **Dropout**: 0.1 (configurable)
 - **Task Type**: Causal Language Modeling
 

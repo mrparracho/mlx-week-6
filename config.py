@@ -12,7 +12,8 @@ from datasets import Dataset
 @dataclass
 class ChinchillaConfig:
     """Chinchilla scaling laws configuration."""
-    base_model_size: Optional[float] = None  # Will be calculated dynamically
+    base_model_size: Optional[float] = None  # Trainable LoRA parameters for scaling analysis
+    total_model_size: Optional[float] = None  # Total model parameters for reference
     dataset_tokens: float = 230e6  # CNN/DailyMail total tokens (~287K examples * 800 tokens)
     apply_scaling_laws: bool = True
     compute_budget: Optional[float] = None  # Will be calculated
@@ -23,8 +24,8 @@ class ChinchillaConfig:
 @dataclass
 class LoRAConfig:
     """LoRA fine-tuning configuration."""
-    rank: int = 16
-    alpha: int = 32  # 2 * rank
+    rank: int = 4 
+    alpha: int = 8  # 2 * rank
     dropout: float = 0.1
     target_modules: Optional[List[str]] = None
     bias: str = "none"  # "none", "all", or "lora_only"
@@ -34,7 +35,7 @@ class LoRAConfig:
         if self.target_modules is None:
             # Qwen2.5 uses separate q_proj, k_proj, v_proj, o_proj for attention
             # and gate_proj, up_proj, down_proj for MLP
-            self.target_modules = ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+            self.target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"] #, "gate_proj", "up_proj", "down_proj"]
         if self.alpha is None:
             self.alpha = 2 * self.rank
 
@@ -102,7 +103,7 @@ class ModelConfig:
     model_name: str = "Qwen/Qwen2.5-0.5B"
     trust_remote_code: bool = True
     use_cache: bool = False
-    torch_dtype: str = "float32"
+    torch_dtype: str = "float16"
     device_map: str = "auto"
 
 
@@ -162,9 +163,11 @@ class Config:
         if hasattr(args, 'apply_chinchilla_scaling'):
             self.chinchilla.apply_scaling_laws = args.apply_chinchilla_scaling
     
-    def update_model_size(self, model_size: float):
-        """Update Chinchilla config with actual model size."""
-        self.chinchilla.base_model_size = model_size
+    def update_model_size(self, trainable_params: float, total_params: float = None):
+        """Update Chinchilla config with trainable LoRA parameters for scaling analysis."""
+        self.chinchilla.base_model_size = trainable_params  # Use trainable params for scaling
+        if total_params:
+            self.chinchilla.total_model_size = total_params  # Store total for reference
     
     def print_config(self):
         """Print configuration in a readable format."""
@@ -201,9 +204,11 @@ class Config:
         print(f"\nCHINCHILLA SCALING:")
         print(f"  Apply Scaling Laws: {self.chinchilla.apply_scaling_laws}")
         if self.chinchilla.base_model_size is not None:
-            print(f"  Base Model Size: {self.chinchilla.base_model_size:.1e}")
-        else:
-            print(f"  Base Model Size: Will be calculated dynamically")
+            print(f"  Trainable LoRA Parameters: {self.chinchilla.base_model_size:.1e}")
+        if self.chinchilla.total_model_size is not None:
+            print(f"  Total Model Parameters: {self.chinchilla.total_model_size:.1e}")
+        if self.chinchilla.base_model_size is None:
+            print(f"  Model Size: Will be calculated dynamically")
         print(f"  Dataset Tokens: {self.chinchilla.dataset_tokens:.1e}")
         
         print(f"\nOUTPUT:")

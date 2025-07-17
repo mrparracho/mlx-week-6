@@ -90,27 +90,29 @@ def get_chinchilla_optimal_params(available_tokens: float,
     return optimal_model_size, optimal_tokens, current_compute
 
 
-def analyze_scaling_efficiency(available_tokens: float, base_model_size: float) -> dict:
+def analyze_scaling_efficiency(available_tokens: float, trainable_params: float, base_model_size: Optional[float] = None) -> dict:
     """
-    Analyze scaling efficiency and provide recommendations.
+    Analyze scaling efficiency and provide recommendations for LoRA training.
     
     Args:
         available_tokens: Available training tokens
-        base_model_size: Base model size in parameters
+        trainable_params: Number of trainable LoRA parameters
+        base_model_size: Base model size in parameters (for reference)
         
     Returns:
         Dictionary with analysis results
     """
     optimal_model_size, optimal_tokens, compute_budget = get_chinchilla_optimal_params(
-        available_tokens, base_model_size
+        available_tokens, trainable_params
     )
     
     # Calculate efficiency metrics
-    model_efficiency = base_model_size / optimal_model_size if optimal_model_size > 0 else float('inf')
+    model_efficiency = trainable_params / optimal_model_size if optimal_model_size > 0 else float('inf')
     token_efficiency = available_tokens / optimal_tokens if optimal_tokens > 0 else float('inf')
     
     analysis = {
-        "current_model_size": base_model_size,
+        "trainable_params": trainable_params,
+        "base_model_size": base_model_size,
         "optimal_model_size": optimal_model_size,
         "available_tokens": available_tokens,
         "optimal_tokens": optimal_tokens,
@@ -123,11 +125,11 @@ def analyze_scaling_efficiency(available_tokens: float, base_model_size: float) 
     # Generate recommendations
     if model_efficiency > 1.2:
         analysis["recommendations"].append(
-            f"Consider using a smaller model. Current: {base_model_size:.1e}, Optimal: {optimal_model_size:.1e}"
+            f"Consider reducing LoRA rank. Current trainable: {trainable_params:.1e}, Optimal: {optimal_model_size:.1e}"
         )
     elif model_efficiency < 0.8:
         analysis["recommendations"].append(
-            f"Consider using a larger model. Current: {base_model_size:.1e}, Optimal: {optimal_model_size:.1e}"
+            f"Consider increasing LoRA rank. Current trainable: {trainable_params:.1e}, Optimal: {optimal_model_size:.1e}"
         )
     
     if token_efficiency < 0.8:
@@ -157,9 +159,11 @@ def format_scientific_notation(value: float) -> str:
 def print_scaling_analysis(analysis: dict):
     """Print scaling analysis in a readable format."""
     print("\n" + "="*60)
-    print("CHINCHILLA SCALING LAWS ANALYSIS")
+    print("CHINCHILLA SCALING LAWS ANALYSIS (LoRA)")
     print("="*60)
-    print(f"Current Model Size: {format_scientific_notation(analysis['current_model_size'])} parameters")
+    print(f"Trainable LoRA Parameters: {format_scientific_notation(analysis['trainable_params'])}")
+    if analysis.get('base_model_size'):
+        print(f"Base Model Size: {format_scientific_notation(analysis['base_model_size'])} parameters")
     print(f"Optimal Model Size: {format_scientific_notation(analysis['optimal_model_size'])} parameters")
     print(f"Available Tokens: {format_scientific_notation(analysis['available_tokens'])}")
     print(f"Optimal Tokens: {format_scientific_notation(analysis['optimal_tokens'])}")

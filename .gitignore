@@ -209,3 +209,4 @@ __marimo__/
 .python-version
 cache/
 trained_model/
+_trained_model/

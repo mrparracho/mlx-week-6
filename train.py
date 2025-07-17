@@ -275,7 +275,7 @@ class LoRATrainer:
                     if not peft_config.base_model_name_or_path:
                         raise ValueError("PEFT config is missing base_model_name_or_path. Cannot load base model.")
                     base_model = AutoModelForCausalLM.from_pretrained(str(peft_config.base_model_name_or_path))
-                    # PeftModel.from_pretrained(base_model, model_id) is the correct signature
+                    # Load the PEFT adapter
                     self.model = PeftModel.from_pretrained(base_model, checkpoint_path)
                     model_loaded = True
             except ImportError:
@@ -410,12 +410,16 @@ class LoRATrainer:
         Returns:
             DataLoader instance
         """
+        # Disable multiprocessing on MPS to prevent resource tracker issues
+        num_workers = 0 if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available() else self.training_config.dataloader_num_workers
+        pin_memory = False if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available() else self.training_config.dataloader_pin_memory
+        
         return DataLoader(
             dataset,
             batch_size=self.training_config.batch_size,
             shuffle=shuffle,
-            pin_memory=self.training_config.dataloader_pin_memory,
-            num_workers=self.training_config.dataloader_num_workers,
+            pin_memory=pin_memory,
+            num_workers=num_workers,
             collate_fn=collate_fn
         )
     
@@ -783,6 +787,53 @@ class LoRATrainer:
             'timestamp': None
         }
     
+    def _cleanup_multiprocessing_resources(self):
+        """
+        Comprehensive cleanup of multiprocessing resources at the end of training.
+        This handles DataLoader workers and other multiprocessing resources.
+        """
+        try:
+            import os
+            import signal
+            import psutil
+            import multiprocessing
+            
+            print("🧹 Cleaning up multiprocessing resources...")
+            
+            # Clean up any remaining child processes
+            current_pid = os.getpid()
+            process = psutil.Process(current_pid)
+            children = process.children(recursive=True)
+            
+            if children:
+                print(f"  Found {len(children)} child processes to clean up")
+                for child in children:
+                    try:
+                        child.terminate()
+                        child.wait(timeout=2)
+                    except:
+                        try:
+                            child.kill()
+                            child.wait(timeout=1)
+                        except:
+                            pass
+            
+            # Clean up multiprocessing resource tracker
+            try:
+                if hasattr(multiprocessing, 'resource_tracker'):
+                    multiprocessing.resource_tracker._CLEANUP_CALLED = True
+            except:
+                pass
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+            print("✓ Multiprocessing resources cleaned up")
+            
+        except Exception as e:
+            print(f"⚠️  Warning: Could not clean up multiprocessing resources: {e}")
+    
     def apply_chinchilla_scaling(self, train_dataset: Dataset) -> Dict:
         """
         Apply Chinchilla scaling laws analysis.
@@ -828,10 +879,15 @@ class LoRATrainer:
             print("Warning: base_model_size not set, skipping scaling analysis")
             return {}
         
-        # Analyze scaling efficiency
+        # Calculate trainable parameters for LoRA
+        trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        total_params = sum(p.numel() for p in self.model.parameters())
+        
+        # Analyze scaling efficiency using trainable LoRA parameters and base model size
         analysis = analyze_scaling_efficiency(
             available_tokens=total_tokens,
-            base_model_size=self.chinchilla_config.base_model_size
+            trainable_params=trainable_params,
+            base_model_size=total_params
         )
         
         # Print analysis
@@ -887,7 +943,11 @@ class LoRATrainer:
             steps_per_epoch = len(train_dataloader)
             completed_epochs = self.global_step // steps_per_epoch
             starting_epoch = completed_epochs
+            
             print(f"Resuming from epoch {starting_epoch + 1}, step {self.global_step}")
+            print(f"Steps per epoch: {steps_per_epoch}")
+            print(f"Completed epochs: {completed_epochs}")
+            print(f"Will train for {self.training_config.max_epochs - starting_epoch} more epochs")
         else:
             starting_epoch = 0
         
@@ -902,12 +962,14 @@ class LoRATrainer:
             # Skip batches if resuming mid-epoch
             if self.resume_from_checkpoint and epoch == starting_epoch:
                 steps_in_current_epoch = self.global_step % len(train_dataloader)
-                for _ in range(steps_in_current_epoch):
-                    try:
-                        next(iter(progress_bar))
-                    except StopIteration:
-                        break
-                print(f"Skipped {steps_in_current_epoch} steps in current epoch")
+                if steps_in_current_epoch > 0:
+                    print(f"Skipping {steps_in_current_epoch} steps in current epoch")
+                    # Skip the progress bar iterator for completed steps
+                    for _ in range(steps_in_current_epoch):
+                        try:
+                            next(iter(progress_bar))
+                        except StopIteration:
+                            break
             
             for batch in progress_bar:
                 loss = self.train_step(batch)
@@ -959,6 +1021,9 @@ class LoRATrainer:
         
         # Save final model
         self.save_checkpoint(output_dir)
+        
+        # Clean up multiprocessing resources
+        self._cleanup_multiprocessing_resources()
         
         return {
             'training_losses': self.training_losses,

@@ -3,7 +3,9 @@
 Main training script for Qwen2.5 LoRA fine-tuning with Chinchilla scaling laws
 """
 
-import os
+import os  # Ensure os is imported at the top and not shadowed
+# Handle macOS multiprocessing resource tracker warnings
+os.environ['PYTHONWARNINGS'] = 'ignore::UserWarning:multiprocessing.resource_tracker'
 import sys
 import argparse
 import json
@@ -65,13 +67,13 @@ def parse_arguments():
     parser.add_argument(
         "--lora_rank",
         type=int,
-        default=16,
+        default=4,  # Match config default
         help="LoRA rank"
     )
     parser.add_argument(
         "--lora_alpha",
         type=int,
-        default=None,
+        default=8,  # Match config default
         help="LoRA alpha (default: 2 * rank)"
     )
     parser.add_argument(
@@ -91,7 +93,7 @@ def parse_arguments():
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=4,
+        default=1,
         help="Batch size"
     )
     parser.add_argument(
@@ -368,9 +370,17 @@ def main():
                 # Note: We cache the base model before LoRA is applied
                 # This is a simplified approach - in practice you might want more sophisticated caching
         
-        # Update Chinchilla config with actual model size
+        # Calculate trainable parameters for LoRA (not total model parameters)
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
         total_params = sum(p.numel() for p in model.parameters())
-        config.update_model_size(total_params)
+
+        # Update Chinchilla config with both trainable and total parameters
+        config.update_model_size(trainable_params, total_params)
+
+        print(f"📊 Model Parameters:")
+        print(f"  Total parameters (base model): {total_params:,}")
+        print(f"  Trainable LoRA parameters: {trainable_params:,}")
+        print(f"  Trainable percentage: {trainable_params/total_params*100:.2f}%")
         
         # Print model size information
         # print_model_size_info(model) # This line was removed as per the new_code
@@ -451,6 +461,26 @@ def main():
         print("✓ TRAINING COMPLETED SUCCESSFULLY")
         print(f"✓ Model saved to: {config.output.output_dir}")
         print("="*80)
+        
+        # Final cleanup to ensure script terminates
+        try:
+            import multiprocessing
+            import gc
+            
+            # Force cleanup of multiprocessing resources
+            gc.collect()
+            
+            # Handle macOS multiprocessing resource tracker issue
+            if hasattr(multiprocessing, 'resource_tracker'):
+                try:
+                    # Set environment variable to disable resource tracker warnings
+                    os.environ['PYTHONWARNINGS'] = 'ignore::UserWarning:multiprocessing.resource_tracker'
+                except:
+                    pass
+            
+            print("🧹 Final cleanup completed")
+        except:
+            pass
         
     except Exception as e:
         print(f"\n❌ Error during training: {e}")

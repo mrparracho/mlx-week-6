@@ -164,6 +164,47 @@ class SummarizationDataLoader:
         # Use 80% of available cores, with bounds
         optimal_procs = max(1, min(int(total_cores * 0.8), 64))
         return optimal_procs
+    
+    def _cleanup_multiprocessing_workers(self):
+        """
+        Clean up any hanging multiprocessing workers after tokenization.
+        This prevents the script from hanging after training completes.
+        """
+        try:
+            import os
+            import signal
+            import psutil
+            
+            current_pid = os.getpid()
+            process = psutil.Process(current_pid)
+            children = process.children(recursive=True)
+            
+            if children:
+                print(f"🧹 Cleaning up {len(children)} multiprocessing workers...")
+                
+                for child in children:
+                    try:
+                        # Try graceful termination first
+                        child.terminate()
+                        child.wait(timeout=3)  # Wait up to 3 seconds
+                    except psutil.TimeoutExpired:
+                        # Force kill if graceful termination fails
+                        try:
+                            child.kill()
+                            child.wait(timeout=1)
+                        except:
+                            pass
+                    except:
+                        # Ignore any other errors
+                        pass
+                
+                print("✓ Multiprocessing workers cleaned up")
+        except ImportError:
+            # psutil not available, skip cleanup
+            pass
+        except Exception as e:
+            # Ignore any cleanup errors to avoid affecting the main process
+            print(f"⚠️  Warning: Could not clean up multiprocessing workers: {e}")
 
     def preprocess_dataset(self, dataset: Dataset) -> Dataset:
         print("Preprocessing dataset...")
@@ -188,6 +229,10 @@ class SummarizationDataLoader:
             desc="Tokenizing"
         )
         print("✓ Dataset preprocessing completed")
+        
+        # Clean up multiprocessing workers after tokenization
+        self._cleanup_multiprocessing_workers()
+        
         return tokenized_dataset
     
     def get_dataset_statistics(self, dataset: Dataset) -> Dict:
