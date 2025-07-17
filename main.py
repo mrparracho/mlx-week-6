@@ -67,13 +67,13 @@ def parse_arguments():
     parser.add_argument(
         "--lora_rank",
         type=int,
-        default=4,  # Match config default
+        default=16,  # Match config default
         help="LoRA rank"
     )
     parser.add_argument(
         "--lora_alpha",
         type=int,
-        default=8,  # Match config default
+        default=32,  # Match config default
         help="LoRA alpha (default: 2 * rank)"
     )
     parser.add_argument(

@@ -24,8 +24,8 @@ class ChinchillaConfig:
 @dataclass
 class LoRAConfig:
     """LoRA fine-tuning configuration."""
-    rank: int = 4 
-    alpha: int = 8  # 2 * rank
+    rank: int = 16 
+    alpha: int = 32  # 2 * rank
     dropout: float = 0.1
     target_modules: Optional[List[str]] = None
     bias: str = "none"  # "none", "all", or "lora_only"
